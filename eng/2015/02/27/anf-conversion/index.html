@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <!--
+        * Author:         Lyruse
+        -->
+        <meta charset="utf-8" />
+        <title>ANF 转换实现 | Lyruse.com</title>
+        <meta name="author" content="Lyruse" />
+        <meta name="description" content="Lyruse's Blog" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=1.0">
+        <link rel="stylesheet" href="/css/default.css" type="text/css" />
+        <link rel="shortcut icon" href="/favicon.ico" type="image/x-icon" />
+    </head>
+<body>
+    <div class="home-menu">
+        <div class="home-icon-con">
+            <a class="home-menu-icon" href="/">Lyruse</a>
+
+        </div>
+    </div>
+
+    <link rel="stylesheet" href="/css/monokai.css" />
+<style type="text/css">
+    body { background:#e8e8e8; }
+    @media screen and (max-width: 750px){
+        body { background:#fff; }
+    }
+    @media screen and (max-width: 1020px){
+        body { background:#fff; }
+    }
+</style>
+
+<div id="content">
+    <div class="entry">
+        <h1 class="entry-title">ANF 转换实现</h1>
+        <p class="entry-date">2015-02-27</p>
+        <p>在1980年代，Continuation-passing style(CPS) 是非常流行的用于编写高阶函数式语言的编译器的中间代码形式。有很多优化过程只能应用于 CPS 后的代码。然后 Sabry 和 Felleisen 发现把源代码转换 CPS 的每一步用另外一种形式来表示，产生的代码可读性更加好，也更加好进行优化和代码分析。这种代码形式就是 ANF，在 ANF 提出后，原先使用 CPS 作为后端优化的编译器都纷纷改为 ANF 形式，当然 CPS 也还有它的用处，用于一些局部的转换来获得一些额外的性能优化。</p>
+
+<p>就像 CPS 做到的那样，A-Normal Form 在语句构成上把计算序列化了，而且它还把表达式分成了两类：原子表达式和复杂表达式。</p>
+
+<p>因为 ANF 简化了程序内部要维持的 continuation，直接把它显示的表示了出来，我们可以更加容易的把它转换成汇编代码或机器代码，甚至让代码的静态分析都变得容易了。</p>
+
+<p>接下来我先用 BNF(Backus-Naur form) 来表示 ANF，介绍它的组成部分，然后说两个由源代码经 ANF 转换的例子，讲讲它与汇编代码的对应关系，再然后就是编写 ANF 转换的思维过程。</p>
+
+<h2 id="a-normal-form-的-bnf-表示">A-Normal Form 的 BNF 表示</h2>
+
+<figure class="highlight"><pre><code class="language-ebnf" data-lang="ebnf"><span class="err">&lt;</span><span class="k">aexp</span><span class="err">&gt;</span> <span class="err">::</span><span class="o">=</span> <span class="k">NUMBER </span><span class="p">|</span> <span class="k">STRING </span><span class="p">|</span> <span class="k">VAR </span><span class="p">|</span> <span class="k">BOOLEAN </span><span class="p">|</span> <span class="k">PRIMOP </span>
+        <span class="p">|</span>  <span class="p">(</span><span class="k">lambda </span><span class="p">(</span><span class="k">VAR </span><span class="err">...</span><span class="p">)</span> <span class="err">&lt;</span><span class="k">exp</span><span class="err">&gt;</span><span class="p">)</span>
+
+<span class="err">&lt;</span><span class="k">cexp</span><span class="err">&gt;</span> <span class="err">::=</span> <span class="p">(</span><span class="err">&lt;</span><span class="k">aexp</span><span class="err">&gt;</span> <span class="err">&lt;</span><span class="k">aexp</span><span class="err">&gt;</span> <span class="err">...</span><span class="p">)</span>
+        <span class="p">|</span>  <span class="p">(</span><span class="k">if </span><span class="err">&lt;</span><span class="k">aexp</span><span class="err">&gt;</span> <span class="err">&lt;</span><span class="k">exp</span><span class="err">&gt;</span> <span class="err">&lt;</span><span class="k">exp</span><span class="err">&gt;</span><span class="p">)</span>
+
+<span class="err">&lt;</span><span class="k">exp</span><span class="err">&gt;</span>  <span class="err">::=</span> <span class="p">(</span><span class="k">let </span><span class="p">([</span><span class="k">VAR </span><span class="err">&lt;</span><span class="k">cexp</span><span class="err">&gt;</span><span class="p">])</span> <span class="err">&lt;</span><span class="k">exp</span><span class="err">&gt;</span><span class="p">)</span>
+        <span class="p">|</span>  <span class="err">&lt;</span><span class="k">cexp</span><span class="err">&gt;</span>
+        <span class="p">|</span>  <span class="err">&lt;</span><span class="k">aexp</span><span class="err">&gt;</span></code></pre></figure>
+
+<p><code>aexp</code>是原子表达式，它的组成可以是一些 literal(字面值) 数据或原子函数和 <code>lambda</code>构造，他们都满足以下的一些条件：</p>
+
+<ul>
+  <li>一定会终止，就是一定会停机。</li>
+  <li>不会引起副作用。</li>
+  <li>没有条件分支。</li>
+  <li>不会产生错误。</li>
+</ul>
+
+<p><code>exp</code>的右边表示的就是一种最小可能的 A-Normal Form，它由<code>aexp</code> <code>cexp</code>和 <code>let</code>复杂表达式值绑定组成。</p>
+
+<h2 id="例子">例子</h2>
+
+<figure class="highlight"><pre><code class="language-scheme" data-lang="scheme"><span class="c1">;; Example 1</span>
+<span class="p">((</span><span class="nf">f</span> <span class="nv">g</span><span class="p">)</span> <span class="p">(</span><span class="nf">h</span> <span class="nv">x</span><span class="p">)</span> <span class="mi">3</span><span class="p">)</span>
+<span class="c1">;=&gt;</span>
+<span class="p">(</span><span class="k">let </span><span class="p">([</span><span class="nv">var0</span> <span class="p">(</span><span class="nf">f</span> <span class="nv">g</span><span class="p">)])</span>
+  <span class="p">(</span><span class="k">let </span><span class="p">([</span><span class="nv">var1</span> <span class="p">(</span><span class="nf">h</span> <span class="nv">x</span><span class="p">)])</span>
+    <span class="p">(</span><span class="nf">varo</span> <span class="nv">var1</span> <span class="mi">3</span><span class="p">)))</span></code></pre></figure>
+
+<p>从上面我们可以看到，无论是函数的位置<code>(f g)</code>，还是函数参数的位置<code>(h x)</code>都不能是函数调用的表达式（即复杂表达式<code>cexp</code>）。我们必须把它序列化，变成显性的先后计算顺序，这里先计算了函数再计算参数，当然也可以先计算了参数再计算函数，这没有一定之规。</p>
+
+<figure class="highlight"><pre><code class="language-scheme" data-lang="scheme"><span class="c1">;; Example 2</span>
+<span class="p">(</span><span class="k">if </span><span class="p">(</span><span class="k">if </span><span class="p">(</span><span class="nf">g</span> <span class="nv">h</span><span class="p">)</span> <span class="mi">5</span> <span class="mi">6</span><span class="p">)</span> <span class="mi">7</span> <span class="mi">8</span><span class="p">)</span> 
+<span class="c1">;=&gt; after anf</span>
+<span class="p">(</span><span class="k">let </span><span class="p">([</span><span class="nv">var0</span> <span class="p">(</span><span class="nf">g</span> <span class="nv">h</span><span class="p">)])</span> 
+  <span class="p">(</span><span class="k">let </span><span class="p">([</span><span class="nv">var1</span> <span class="p">(</span><span class="k">if </span><span class="nv">var0</span> <span class="mi">5</span> <span class="mi">6</span><span class="p">)])</span> 
+    <span class="p">(</span><span class="k">if </span><span class="nv">var1</span> <span class="mi">7</span> <span class="mi">8</span><span class="p">)))</span>
+<span class="c1">;=&gt; after cps</span>
+<span class="p">(</span><span class="nf">g</span> <span class="nv">h</span>
+   <span class="p">(</span><span class="k">lambda </span><span class="p">(</span><span class="nf">v0</span><span class="p">)</span>
+        <span class="p">(</span><span class="k">let </span><span class="p">([</span><span class="nv">k</span> <span class="p">(</span><span class="k">lambda </span><span class="p">(</span><span class="nf">v1</span><span class="p">)</span> <span class="p">(</span><span class="k">if </span><span class="nv">v1</span> <span class="mi">7</span> <span class="mi">8</span><span class="p">))])</span>
+          <span class="p">(</span><span class="k">if </span><span class="nv">v0</span> <span class="p">(</span><span class="nf">k</span> <span class="mi">5</span><span class="p">)</span> <span class="p">(</span><span class="nf">k</span> <span class="mi">6</span><span class="p">)))))</span></code></pre></figure>
+
+<p>上面我把 ANF 和 CPS 形式的代码都列出来了，很明显 ANF 的代码可读性比较好，因为它没有很多嵌套的 <code>lambda</code> 函数，它只是一层层的推进，先计算什么再计算什么一目了然。</p>
+
+<h2 id="与汇编代码的联系">与汇编代码的联系</h2>
+<p>下面我把 ANF 代码和汇编伪代码并排在一起，大家可以看看两者之间有什么样的联系。</p>
+
+<figure class="highlight"><pre><code class="language-scheme" data-lang="scheme"><span class="p">(</span><span class="k">define </span><span class="p">(</span><span class="nf">celsius</span> <span class="nv">F</span><span class="p">)</span>             <span class="c1">;celsius: mov F, a0</span>
+  <span class="p">(</span><span class="k">let </span><span class="p">([</span><span class="nv">var0</span> <span class="p">(</span><span class="nb">/ </span><span class="mi">5</span> <span class="mi">9</span><span class="p">)])</span>         <span class="c1">;         div var0, 5, 9</span>
+    <span class="p">(</span><span class="k">let </span><span class="p">([</span><span class="nv">var1</span> <span class="p">(</span><span class="nb">- </span><span class="nv">F</span> <span class="mi">32</span><span class="p">)])</span>      <span class="c1">;         sub var1, F, 32</span>
+      <span class="p">(</span><span class="nb">* </span><span class="nv">var0</span> <span class="nv">var1</span><span class="p">))))</span>          <span class="c1">;         mul rv, var0, var1</span>
+                                <span class="c1">;         ret rv</span></code></pre></figure>
+
+<h2 id="开始转换">开始转换</h2>
+<p>写代码的时候先想清楚输入与输出很重要，这里输入与输入都是 S-Expression，也就是 Scheme 里的<code>list</code>数据结构。然后把要做的事情，要达到的效果写下来，再写个程序的骨架。因为我们要把整个程序进行分析，分析程序的控制流，然后把最先要计算的表达式用<code>let-bound</code>形式一个个写出来，所以我们只能用 continuation-passing style 来写这个转换。</p>
+
+<figure class="highlight"><pre><code class="language-scheme" data-lang="scheme"><span class="c1">;; S-exp -&gt; S-exp</span>
+<span class="c1">;; transform a normal exp into anf</span>
+<span class="p">(</span><span class="k">define </span><span class="nv">anf</span>
+ <span class="p">(</span><span class="k">lambda </span><span class="p">(</span><span class="nf">expr</span><span class="p">)</span>
+  <span class="p">(</span><span class="k">letrec </span>
+       <span class="p">((</span><span class="nf">gen-name</span> <span class="p">(</span><span class="k">let </span><span class="p">([</span><span class="nv">n</span> <span class="mi">-1</span><span class="p">])</span>
+                   <span class="p">(</span><span class="k">lambda </span><span class="p">()</span>
+                    <span class="p">(</span><span class="k">set! </span><span class="nv">n</span> <span class="p">(</span><span class="nb">+ </span><span class="nv">n</span> <span class="mi">1</span><span class="p">))</span>
+                    <span class="p">(</span><span class="nb">string-&gt;symbol </span><span class="p">(</span><span class="nb">string-append </span><span class="s">&quot;var&quot;</span> <span class="p">(</span><span class="nb">number-&gt;string </span><span class="nv">n</span><span class="p">))))))</span>
+        <span class="p">(</span><span class="nf">id</span> <span class="p">(</span><span class="k">lambda </span><span class="p">(</span><span class="nf">x</span><span class="p">)</span> <span class="nv">x</span><span class="p">))</span>
+        <span class="p">(</span><span class="nf">primop?</span> <span class="p">(</span><span class="k">lambda </span><span class="p">(</span><span class="nf">x</span><span class="p">)</span>
+                  <span class="o">...</span><span class="p">))</span>
+        <span class="p">(</span><span class="nf">anf1</span> <span class="p">(</span><span class="k">lambda </span><span class="p">(</span><span class="nb">exp </span><span class="nv">k</span><span class="p">)</span>  <span class="c1">;; k represents what should we do with exp</span>
+               <span class="p">(</span><span class="nf">pmatch</span> <span class="nv">exp</span>
+                <span class="p">[</span><span class="o">`,</span><span class="nv">x</span> <span class="o">...</span><span class="p">]</span>
+                <span class="p">[</span><span class="o">`</span><span class="p">(</span><span class="k">lambda </span><span class="p">(</span><span class="o">,</span><span class="nv">var</span><span class="p">)</span> <span class="o">,</span><span class="nv">body</span><span class="p">)</span> <span class="o">...</span><span class="p">]</span>
+                <span class="p">[</span><span class="o">`</span><span class="p">(</span><span class="k">if </span><span class="o">,</span><span class="nv">test</span> <span class="o">,</span><span class="nv">then</span> <span class="o">,</span><span class="nv">alt</span><span class="p">)</span> <span class="o">...</span><span class="p">]</span>
+                <span class="p">[</span><span class="o">`</span><span class="p">(</span><span class="o">,</span><span class="nv">rator</span> <span class="o">,</span><span class="nv">rand</span><span class="p">)</span> <span class="o">...</span><span class="p">]))))</span>
+   <span class="p">(</span><span class="nf">anf1</span> <span class="nv">expr</span> <span class="nv">id</span><span class="p">))))</span></code></pre></figure>
+
+<p>上面已经把整个结构组织好了，因为要用到<code>let-bound</code>表达式，我们需要<code>gen-name</code>生成新的变量名，当然我们也可以使用系统自带的<code>gensym</code>，然后<code>id</code>用来判断控制流到达处是不是顶层调用，即是不是没有操作等待着，<code>primop?</code>用来判断是否原子运算符。</p>
+
+<p>下面先把原子表达式的分支处理给添上，那是简单的部分。</p>
+
+<figure class="highlight"><pre><code class="language-scheme" data-lang="scheme"><span class="c1">;; S-exp -&gt; S-exp</span>
+<span class="c1">;; transform a normal exp into anf</span>
+<span class="p">(</span><span class="k">define </span><span class="nv">anf</span>
+ <span class="p">(</span><span class="k">lambda </span><span class="p">(</span><span class="nf">expr</span><span class="p">)</span>
+  <span class="p">(</span><span class="k">letrec </span>
+       <span class="p">((</span><span class="nf">gen-name</span> <span class="p">(</span><span class="k">let </span><span class="p">([</span><span class="nv">n</span> <span class="mi">-1</span><span class="p">])</span>
+                   <span class="p">(</span><span class="k">lambda </span><span class="p">()</span>
+                    <span class="p">(</span><span class="k">set! </span><span class="nv">n</span> <span class="p">(</span><span class="nb">+ </span><span class="nv">n</span> <span class="mi">1</span><span class="p">))</span>
+                    <span class="p">(</span><span class="nb">string-&gt;symbol </span><span class="p">(</span><span class="nb">string-append </span><span class="s">&quot;var&quot;</span> <span class="p">(</span><span class="nb">number-&gt;string </span><span class="nv">n</span><span class="p">))))))</span>
+        <span class="p">(</span><span class="nf">id</span> <span class="p">(</span><span class="k">lambda </span><span class="p">(</span><span class="nf">x</span><span class="p">)</span> <span class="nv">x</span><span class="p">))</span>
+        <span class="p">(</span><span class="nf">primop?</span> <span class="p">(</span><span class="k">lambda </span><span class="p">(</span><span class="nf">x</span><span class="p">)</span>
+                  <span class="p">(</span><span class="k">case </span><span class="nv">x</span>
+                   <span class="p">[(</span><span class="nf">add1</span><span class="p">)</span> <span class="no">#t</span><span class="p">]</span>
+                   <span class="p">[(</span><span class="nf">sub1</span><span class="p">)</span> <span class="no">#t</span><span class="p">]</span>
+                   <span class="p">[(</span><span class="nf">zero?</span><span class="p">)</span> <span class="no">#t</span><span class="p">]</span>
+                   <span class="p">[</span><span class="k">else </span><span class="no">#f</span><span class="p">])))</span>
+        <span class="p">(</span><span class="nf">anf1</span> <span class="p">(</span><span class="k">lambda </span><span class="p">(</span><span class="nb">exp </span><span class="nv">k</span><span class="p">)</span>
+               <span class="p">(</span><span class="nf">pmatch</span> <span class="nv">exp</span>
+                <span class="p">[</span><span class="o">`,</span><span class="nv">x</span> <span class="p">(</span><span class="nf">guard</span> <span class="p">(</span><span class="k">or </span><span class="p">(</span><span class="nb">number? </span><span class="nv">exp</span><span class="p">)</span> <span class="p">(</span><span class="nb">symbol? </span><span class="nv">exp</span><span class="p">)</span> <span class="p">(</span><span class="nb">string? </span><span class="nv">exp</span><span class="p">)</span>
+                      <span class="p">(</span><span class="nb">boolean? </span><span class="nv">exp</span><span class="p">)</span> <span class="p">(</span><span class="nf">primop?</span> <span class="nv">exp</span><span class="p">)))</span>
+                     <span class="p">(</span><span class="nf">k</span> <span class="nv">x</span><span class="p">)]</span> <span class="c1">;; 原子表达式不用处理，直接返回。</span>
+                <span class="p">[</span><span class="o">`</span><span class="p">(</span><span class="k">lambda </span><span class="p">(</span><span class="o">,</span><span class="nv">var</span><span class="p">)</span> <span class="o">,</span><span class="nv">body</span><span class="p">)</span>
+                  <span class="p">(</span><span class="nf">k</span> <span class="o">`</span><span class="p">(</span><span class="k">lambda </span><span class="p">(</span><span class="o">,</span><span class="nv">var</span><span class="p">)</span> <span class="o">,</span><span class="p">(</span><span class="nf">anf1</span> <span class="nv">body</span> <span class="nv">id</span><span class="p">)))]</span>
+                  <span class="c1">;; lambda构造也是原子表达式，可以直接返回，只不过要对函数体进行相应</span>
+                  <span class="c1">;; 的ANF化。</span>
+                <span class="p">[</span><span class="o">`</span><span class="p">(</span><span class="k">if </span><span class="o">,</span><span class="nv">test</span> <span class="o">,</span><span class="nv">then</span> <span class="o">,</span><span class="nv">alt</span><span class="p">)</span> <span class="o">...</span><span class="p">]</span>
+                <span class="p">[</span><span class="o">`</span><span class="p">(</span><span class="o">,</span><span class="nv">rator</span> <span class="o">,</span><span class="nv">rand</span><span class="p">)</span> <span class="o">...</span><span class="p">]))))</span>
+   <span class="p">(</span><span class="nf">anf1</span> <span class="nv">expr</span> <span class="nv">id</span><span class="p">))))</span></code></pre></figure>
+
+<p>下面我针对<code>if</code>条件表达式进行处理。</p>
+
+<figure class="highlight"><pre><code class="language-scheme" data-lang="scheme"><span class="p">[</span><span class="o">`</span><span class="p">(</span><span class="k">if </span><span class="o">,</span><span class="nv">test</span> <span class="o">,</span><span class="nv">then</span> <span class="o">,</span><span class="nv">alt</span><span class="p">)</span>
+  <span class="p">(</span><span class="nf">anf1</span> <span class="nv">test</span> <span class="p">(</span><span class="k">lambda </span><span class="p">(</span><span class="nf">t</span><span class="p">)</span>
+               <span class="p">(</span><span class="k">if </span><span class="p">(</span><span class="nb">eq? </span><span class="nv">k</span> <span class="nv">id</span><span class="p">)</span>  
+                  <span class="c1">;;如果没有别的操作等待当前这个条件表达式</span>
+                 <span class="o">`</span><span class="p">(</span><span class="k">if </span><span class="o">,</span><span class="nv">t</span> <span class="o">,</span><span class="p">(</span><span class="nf">anf1</span> <span class="nv">then</span> <span class="nv">id</span><span class="p">)</span> <span class="o">,</span><span class="p">(</span><span class="nf">anf1</span> <span class="nv">alt</span> <span class="nv">id</span><span class="p">))</span> 
+                  <span class="c1">;;就直接返回作为 cexp(complex-exp)</span>
+                 <span class="p">(</span><span class="k">let </span><span class="p">([</span><span class="nv">n</span> <span class="p">(</span><span class="nf">gen-name</span><span class="p">)])</span>  <span class="c1">;; 如果这个条件表达式是某个 cexp 的一部分</span>
+                    <span class="o">`</span><span class="p">(</span><span class="k">let </span><span class="p">([</span><span class="o">,</span><span class="nv">n</span> <span class="p">(</span><span class="k">if </span><span class="o">,</span><span class="nv">t</span> <span class="o">,</span><span class="p">(</span><span class="nf">anf1</span> <span class="nv">then</span> <span class="nv">id</span><span class="p">)</span> <span class="o">,</span><span class="p">(</span><span class="nf">anf1</span> <span class="nv">alt</span> <span class="nv">id</span><span class="p">))])</span> <span class="c1">;; 因为 if 也是 cexp</span>
+                        <span class="o">,</span><span class="p">(</span><span class="nf">k</span> <span class="nv">n</span><span class="p">))))))]</span> <span class="c1">;;所以使用一个let-bound来表示这个运算，而且传递结果给k。</span></code></pre></figure>
+
+<p>最后针对函数应用进行处理。</p>
+
+<figure class="highlight"><pre><code class="language-scheme" data-lang="scheme"><span class="p">[</span><span class="o">`</span><span class="p">(</span><span class="o">,</span><span class="nv">rator</span> <span class="o">,</span><span class="nv">rand</span><span class="p">)</span>
+  <span class="p">(</span><span class="nf">anf1</span> <span class="nv">rator</span> 
+    <span class="p">(</span><span class="k">lambda </span><span class="p">(</span><span class="nf">ra</span><span class="p">)</span>  <span class="c1">;; 这里的难点是怎么看待这个参数ra和continuation</span>
+      <span class="p">(</span><span class="nf">anf1</span> <span class="nv">rand</span>  <span class="c1">;; 我们知道传给k的都是原子表达式就可以了</span>
+        <span class="p">(</span><span class="k">lambda </span><span class="p">(</span><span class="nf">rd</span><span class="p">)</span>  <span class="c1">;; 这里的continuation表示接下来要怎么处理直接处理好的ra和rd。</span>
+          <span class="p">(</span><span class="nf">cond</span>
+            <span class="p">[(</span><span class="nb">eq? </span><span class="nv">id</span> <span class="nv">k</span><span class="p">)</span> <span class="c1">;;如果这个函数应用已经是顶层调用的话</span>
+             <span class="o">`</span><span class="p">(</span><span class="o">,</span><span class="nv">ra</span> <span class="o">,</span><span class="nv">rd</span><span class="p">)]</span>
+            <span class="p">[</span><span class="k">else </span><span class="p">(</span><span class="k">let </span><span class="p">([</span><span class="nv">n</span> <span class="p">(</span><span class="nf">gen-name</span><span class="p">)])</span>
+                    <span class="o">`</span><span class="p">(</span><span class="k">let </span><span class="p">([</span><span class="o">,</span><span class="nv">n</span> <span class="p">(</span><span class="o">,</span><span class="nv">ra</span> <span class="o">,</span><span class="nv">rd</span><span class="p">)])</span> <span class="c1">;;然后直接把ra放在函数的位置，它一定是个变量符号。</span>
+                       <span class="o">,</span><span class="p">(</span><span class="nf">k</span> <span class="nv">n</span><span class="p">)))]))))]</span> </code></pre></figure>
+
+<p>其实这个函数现在看来真是容易的一塌糊涂，不过是在我非常熟悉cps的情况下，对程序控制流非常熟悉了。
+最后完整的代码就是下面的那样。</p>
+
+<figure class="highlight"><pre><code class="language-scheme" data-lang="scheme"><span class="p">(</span><span class="k">define </span><span class="nv">anf</span>
+ <span class="p">(</span><span class="k">lambda </span><span class="p">(</span><span class="nf">expr</span><span class="p">)</span>
+  <span class="p">(</span><span class="k">letrec </span>
+       <span class="p">((</span><span class="nf">gen-name</span> <span class="p">(</span><span class="k">let </span><span class="p">([</span><span class="nv">n</span> <span class="mi">-1</span><span class="p">])</span>
+                   <span class="p">(</span><span class="k">lambda </span><span class="p">()</span>
+                    <span class="p">(</span><span class="k">set! </span><span class="nv">n</span> <span class="p">(</span><span class="nb">+ </span><span class="nv">n</span> <span class="mi">1</span><span class="p">))</span>
+                    <span class="p">(</span><span class="nb">string-&gt;symbol </span><span class="p">(</span><span class="nb">string-append </span><span class="s">&quot;var&quot;</span> <span class="p">(</span><span class="nb">number-&gt;string </span><span class="nv">n</span><span class="p">))))))</span>
+        <span class="p">(</span><span class="nf">id</span> <span class="p">(</span><span class="k">lambda </span><span class="p">(</span><span class="nf">x</span><span class="p">)</span> <span class="nv">x</span><span class="p">))</span>
+        <span class="p">(</span><span class="nf">primop?</span> <span class="p">(</span><span class="k">lambda </span><span class="p">(</span><span class="nf">x</span><span class="p">)</span>
+                  <span class="p">(</span><span class="k">case </span><span class="nv">x</span>
+                   <span class="p">[(</span><span class="nf">add1</span><span class="p">)</span> <span class="no">#t</span><span class="p">]</span>
+                   <span class="p">[(</span><span class="nf">sub1</span><span class="p">)</span> <span class="no">#t</span><span class="p">]</span>
+                   <span class="p">[(</span><span class="nf">zero?</span><span class="p">)</span> <span class="no">#t</span><span class="p">]</span>
+                   <span class="p">[</span><span class="k">else </span><span class="no">#f</span><span class="p">])))</span>
+        <span class="p">(</span><span class="nf">anf1</span> <span class="p">(</span><span class="k">lambda </span><span class="p">(</span><span class="nb">exp </span><span class="nv">k</span><span class="p">)</span>
+               <span class="p">(</span><span class="nf">pmatch</span> <span class="nv">exp</span>
+                <span class="p">[</span><span class="o">`,</span><span class="nv">x</span> <span class="p">(</span><span class="nf">guard</span> <span class="p">(</span><span class="k">or </span><span class="p">(</span><span class="nb">number? </span><span class="nv">exp</span><span class="p">)</span> <span class="p">(</span><span class="nb">symbol? </span><span class="nv">exp</span><span class="p">)</span> <span class="p">(</span><span class="nb">string? </span><span class="nv">exp</span><span class="p">)</span>
+                    <span class="p">(</span><span class="nb">boolean? </span><span class="nv">exp</span><span class="p">)</span> <span class="p">(</span><span class="nf">primop?</span> <span class="nv">exp</span><span class="p">)))</span>
+                 <span class="p">(</span><span class="nf">k</span> <span class="nv">x</span><span class="p">)]</span>
+                <span class="p">[</span><span class="o">`</span><span class="p">(</span><span class="k">lambda </span><span class="p">(</span><span class="o">,</span><span class="nv">var</span><span class="p">)</span> <span class="o">,</span><span class="nv">body</span><span class="p">)</span>
+                 <span class="p">(</span><span class="nf">k</span> <span class="o">`</span><span class="p">(</span><span class="k">lambda </span><span class="p">(</span><span class="o">,</span><span class="nv">var</span><span class="p">)</span> <span class="o">,</span><span class="p">(</span><span class="nf">anf1</span> <span class="nv">body</span> <span class="nv">id</span><span class="p">)))]</span>
+                <span class="p">[</span><span class="o">`</span><span class="p">(</span><span class="k">if </span><span class="o">,</span><span class="nv">test</span> <span class="o">,</span><span class="nv">then</span> <span class="o">,</span><span class="nv">alt</span><span class="p">)</span>
+                 <span class="p">(</span><span class="nf">anf1</span> <span class="nv">test</span> <span class="p">(</span><span class="k">lambda </span><span class="p">(</span><span class="nf">t</span><span class="p">)</span>
+                             <span class="p">(</span><span class="k">if </span><span class="p">(</span><span class="nb">eq? </span><span class="nv">k</span> <span class="nv">id</span><span class="p">)</span>
+                              <span class="o">`</span><span class="p">(</span><span class="k">if </span><span class="o">,</span><span class="nv">t</span> <span class="o">,</span><span class="p">(</span><span class="nf">anf1</span> <span class="nv">then</span> <span class="nv">id</span><span class="p">)</span> <span class="o">,</span><span class="p">(</span><span class="nf">anf1</span> <span class="nv">alt</span> <span class="nv">id</span><span class="p">))</span>  
+                              <span class="p">(</span><span class="k">let </span><span class="p">([</span><span class="nv">n</span> <span class="p">(</span><span class="nf">gen-name</span><span class="p">)])</span>
+                               <span class="o">`</span><span class="p">(</span><span class="k">let </span><span class="p">([</span><span class="o">,</span><span class="nv">n</span> <span class="p">(</span><span class="k">if </span><span class="o">,</span><span class="nv">t</span> <span class="o">,</span><span class="p">(</span><span class="nf">anf1</span> <span class="nv">then</span> <span class="nv">id</span><span class="p">)</span> <span class="o">,</span><span class="p">(</span><span class="nf">anf1</span> <span class="nv">alt</span> <span class="nv">id</span><span class="p">))])</span>
+                                 <span class="o">,</span><span class="p">(</span><span class="nf">k</span> <span class="nv">n</span><span class="p">))))))]</span>
+                <span class="p">[</span><span class="o">`</span><span class="p">(</span><span class="o">,</span><span class="nv">rator</span> <span class="o">,</span><span class="nv">rand</span><span class="p">)</span>
+                 <span class="p">(</span><span class="nf">anf1</span> <span class="nv">rator</span> <span class="p">(</span><span class="k">lambda </span><span class="p">(</span><span class="nf">ra</span><span class="p">)</span>
+                              <span class="p">(</span><span class="nf">anf1</span> <span class="nv">rand</span>
+                               <span class="p">(</span><span class="k">lambda </span><span class="p">(</span><span class="nf">rd</span><span class="p">)</span>
+                                <span class="p">(</span><span class="nf">cond</span>
+                                 <span class="p">[(</span><span class="nb">eq? </span><span class="nv">id</span> <span class="nv">k</span><span class="p">)</span>
+                                 <span class="o">`</span><span class="p">(</span><span class="o">,</span><span class="nv">ra</span> <span class="o">,</span><span class="nv">rd</span><span class="p">)]</span>
+                                 <span class="p">[</span><span class="k">else </span><span class="p">(</span><span class="k">let </span><span class="p">([</span><span class="nv">n</span> <span class="p">(</span><span class="nf">gen-name</span><span class="p">)])</span>
+                                   <span class="o">`</span><span class="p">(</span><span class="k">let </span><span class="p">([</span><span class="o">,</span><span class="nv">n</span> <span class="p">(</span><span class="o">,</span><span class="nv">ra</span> <span class="o">,</span><span class="nv">rd</span><span class="p">)])</span>
+                                     <span class="o">,</span><span class="p">(</span><span class="nf">k</span> <span class="nv">n</span><span class="p">)))])))))]))))</span>
+    <span class="p">(</span><span class="nf">anf1</span> <span class="nv">expr</span> <span class="nv">id</span><span class="p">))))</span></code></pre></figure>
+
+<h2 id="完善优化">完善优化</h2>
+<p>上面那个就是我几经修改得出的我自己比较满意的版本了，一开始是完全摸不着头脑的，不过一步一步的解决了一些关键性思路后，就好像突然开窍了，顺手就把它完成了。不过上面那个版本的函数只能处理一个参数的情况，我们必须要增加多参数处理的分支，并且留意到处理条件分支和函数应用分支都有很大部分代码重复，我为了贯彻 DRY 原则，必须得把它进行抽象。在完成了程序的关键部分后，再着手修改一些枝叶，这样会让程序变得更加的健壮和易扩展。不然一开始就要考虑到方方面面，就不可能做得到，那属于典型的过度工程。</p>
+
+<figure class="highlight"><pre><code class="language-scheme" data-lang="scheme"><span class="p">(</span><span class="k">define </span><span class="nv">anf</span>
+ <span class="p">(</span><span class="k">lambda </span><span class="p">(</span><span class="nf">expr</span><span class="p">)</span>
+  <span class="p">(</span><span class="k">letrec </span>
+         <span class="p">((</span><span class="nf">gen-name</span> <span class="p">(</span><span class="k">let </span><span class="p">([</span><span class="nv">n</span> <span class="mi">-1</span><span class="p">])</span>
+                     <span class="p">(</span><span class="k">lambda </span><span class="p">()</span>
+                      <span class="p">(</span><span class="k">set! </span><span class="nv">n</span> <span class="p">(</span><span class="nb">+ </span><span class="nv">n</span> <span class="mi">1</span><span class="p">))</span>
+                      <span class="p">(</span><span class="nb">string-&gt;symbol </span>
+                        <span class="p">(</span><span class="nb">string-append </span><span class="s">&quot;var&quot;</span> <span class="p">(</span><span class="nb">number-&gt;string </span><span class="nv">n</span><span class="p">))))))</span>
+          <span class="p">(</span><span class="nf">id</span> <span class="p">(</span><span class="k">lambda </span><span class="p">(</span><span class="nf">x</span><span class="p">)</span> <span class="nv">x</span><span class="p">))</span>
+          <span class="p">(</span><span class="nf">primop?</span> <span class="p">(</span><span class="k">lambda </span><span class="p">(</span><span class="nf">x</span><span class="p">)</span>
+                    <span class="p">(</span><span class="k">case </span><span class="nv">x</span>
+                     <span class="p">[(</span><span class="nb">+ </span><span class="nv">-</span> <span class="nv">*</span> <span class="nv">=</span> <span class="nv">/</span><span class="p">)</span> <span class="no">#t</span><span class="p">]</span>
+                     <span class="p">[</span><span class="k">else </span><span class="no">#f</span><span class="p">])))</span>        
+          <span class="p">(</span><span class="nf">anf1</span> <span class="p">(</span><span class="k">lambda </span><span class="p">(</span><span class="nb">exp </span><span class="nv">k</span><span class="p">)</span>
+                 <span class="p">(</span><span class="nf">pmatch</span> <span class="nv">exp</span>
+                  <span class="p">[</span><span class="o">`,</span><span class="nv">x</span> <span class="p">(</span><span class="nf">guard</span> <span class="p">(</span><span class="k">or </span><span class="p">(</span><span class="nb">number? </span><span class="nv">exp</span><span class="p">)</span> <span class="p">(</span><span class="nb">symbol? </span><span class="nv">exp</span><span class="p">)</span> <span class="p">(</span><span class="nb">string? </span><span class="nv">exp</span><span class="p">)</span>
+                      <span class="p">(</span><span class="nb">boolean? </span><span class="nv">exp</span><span class="p">)</span> <span class="p">(</span><span class="nf">primop?</span> <span class="nv">exp</span><span class="p">)))</span>
+                   <span class="p">(</span><span class="nf">k</span> <span class="nv">x</span><span class="p">)]</span>
+                  <span class="p">[</span><span class="o">`</span><span class="p">(</span><span class="k">lambda </span><span class="p">(</span><span class="o">,</span><span class="nv">var</span><span class="p">)</span> <span class="o">,</span><span class="nv">body</span><span class="p">)</span>
+                   <span class="p">(</span><span class="nf">k</span> <span class="o">`</span><span class="p">(</span><span class="k">lambda </span><span class="p">(</span><span class="o">,</span><span class="nv">var</span><span class="p">)</span> <span class="o">,</span><span class="p">(</span><span class="nf">anf1</span> <span class="nv">body</span> <span class="nv">id</span><span class="p">)))]</span>
+                  <span class="p">[</span><span class="o">`</span><span class="p">(</span><span class="k">if </span><span class="o">,</span><span class="nv">test</span> <span class="o">,</span><span class="nv">then</span> <span class="o">,</span><span class="nv">alt</span><span class="p">)</span>
+                   <span class="p">(</span><span class="nf">anf1</span> <span class="nv">test</span> <span class="p">(</span><span class="k">lambda </span><span class="p">(</span><span class="nf">t</span><span class="p">)</span>
+                               <span class="p">(</span><span class="nf">add-let-bound</span> 
+                                <span class="o">`</span><span class="p">(</span><span class="k">if </span><span class="o">,</span><span class="nv">t</span> <span class="o">,</span><span class="p">(</span><span class="nf">anf1</span> <span class="nv">then</span> <span class="nv">id</span><span class="p">)</span> <span class="o">,</span><span class="p">(</span><span class="nf">anf1</span> <span class="nv">alt</span> <span class="nv">id</span><span class="p">))</span> <span class="nv">k</span><span class="p">)))]</span>
+                  <span class="p">[</span><span class="o">`</span><span class="p">(</span><span class="o">,</span><span class="nv">rator</span> <span class="o">.</span> <span class="o">,</span><span class="nv">rand*</span><span class="p">)</span>
+                   <span class="p">(</span><span class="nf">anf1</span> <span class="nv">rator</span>
+                    <span class="p">(</span><span class="k">lambda </span><span class="p">(</span><span class="nf">ra</span><span class="p">)</span>
+                     <span class="p">(</span><span class="nf">anf1*</span> <span class="nv">rand*</span>
+                      <span class="p">(</span><span class="k">lambda </span><span class="p">(</span><span class="nf">rd*</span><span class="p">)</span>
+                       <span class="p">(</span><span class="nf">add-let-bound</span> <span class="o">`</span><span class="p">(</span><span class="o">,</span><span class="nv">ra</span> <span class="o">.</span> <span class="o">,</span><span class="nv">rd*</span><span class="p">)</span> <span class="nv">k</span><span class="p">)))))])))</span>
+          <span class="p">(</span><span class="nf">anf1*</span> <span class="p">(</span><span class="k">lambda </span><span class="p">(</span><span class="nf">exp*</span> <span class="nv">k</span><span class="p">)</span>
+                  <span class="p">(</span><span class="k">if </span><span class="p">(</span><span class="nb">null? </span><span class="nv">exp*</span><span class="p">)</span>
+                   <span class="p">(</span><span class="nf">k</span> <span class="o">&#39;</span><span class="p">())</span>
+                   <span class="p">(</span><span class="nf">anf1</span> <span class="p">(</span><span class="nb">car </span><span class="nv">exp*</span><span class="p">)</span>
+                    <span class="p">(</span><span class="k">lambda </span><span class="p">(</span><span class="nf">a</span><span class="p">)</span>
+                     <span class="p">(</span><span class="nf">anf1*</span> <span class="p">(</span><span class="nb">cdr </span><span class="nv">exp*</span><span class="p">)</span>
+                      <span class="p">(</span><span class="k">lambda </span><span class="p">(</span><span class="nf">d</span><span class="p">)</span>
+                       <span class="p">(</span><span class="nf">k</span> <span class="o">`</span><span class="p">(</span><span class="o">,</span><span class="nv">a</span> <span class="o">.</span> <span class="o">,</span><span class="nv">d</span><span class="p">)))))))))</span>
+          <span class="p">(</span><span class="nf">add-let-bound</span> <span class="p">(</span><span class="k">lambda </span><span class="p">(</span><span class="nb">exp </span><span class="nv">k</span><span class="p">)</span>
+                          <span class="p">(</span><span class="k">if </span><span class="p">(</span><span class="nb">eq? </span><span class="nv">id</span> <span class="nv">k</span><span class="p">)</span>
+                             <span class="nv">exp</span>
+                             <span class="p">(</span><span class="k">let </span><span class="p">([</span><span class="nv">n</span> <span class="p">(</span><span class="nf">gen-name</span><span class="p">)])</span>
+                              <span class="o">`</span><span class="p">(</span><span class="k">let </span><span class="p">([</span><span class="o">,</span><span class="nv">n</span> <span class="o">,</span><span class="nv">exp</span><span class="p">])</span>
+                                <span class="o">,</span><span class="p">(</span><span class="nf">k</span> <span class="nv">n</span><span class="p">)))))))</span>
+    <span class="p">(</span><span class="nf">anf1</span> <span class="nv">expr</span> <span class="nv">id</span><span class="p">))))</span></code></pre></figure>
+
+<p>完美，简直就是完美。模式匹配真是让事情轻松了很多，这里使用的 pmatch 是 Daniel P. Friedman 等人专门为 Racket 写的，只能匹配 <code>list</code> 数据结构，不过 Racket 自带了一个很好用的 Pattern matching 函数 <code>match</code>，可以匹配<code>list</code> <code>vector</code> <code>struct</code>等数据结构，用法跟这里的使用一致，如果你想要把这段代码在 DrRacket 里面运行，只需要把 <code>pmatch</code> 改成 <code>match</code>，然后再改动一下anf1中的第一条分支就可以了，按如下来改动。</p>
+
+<figure class="highlight"><pre><code class="language-scheme" data-lang="scheme"><span class="o">#</span><span class="c1">;#;</span>
+<span class="p">[</span><span class="o">`,</span><span class="nv">x</span> <span class="p">(</span><span class="nf">guard</span> <span class="p">(</span><span class="k">or </span><span class="p">(</span><span class="nb">number? </span><span class="nv">exp</span><span class="p">)</span> <span class="p">(</span><span class="nb">symbol? </span><span class="nv">exp</span><span class="p">)</span> <span class="p">(</span><span class="nb">string? </span><span class="nv">exp</span><span class="p">)</span>
+      <span class="p">(</span><span class="nb">boolean? </span><span class="nv">exp</span><span class="p">)</span> <span class="p">(</span><span class="nf">primop?</span> <span class="nv">exp</span><span class="p">)))</span>
+  <span class="p">(</span><span class="nf">k</span> <span class="nv">x</span><span class="p">)]</span>
+<span class="c1">;; change to ===&gt;</span>
+<span class="p">[</span><span class="o">`,</span><span class="nv">x</span> <span class="o">#</span><span class="nv">:when</span> <span class="p">(</span><span class="k">or </span><span class="p">(</span><span class="nb">number? </span><span class="nv">exp</span><span class="p">)</span> <span class="p">(</span><span class="nb">symbol? </span><span class="nv">exp</span><span class="p">)</span> <span class="p">(</span><span class="nb">string? </span><span class="nv">exp</span><span class="p">)</span>
+    <span class="p">(</span><span class="nb">boolean? </span><span class="nv">exp</span><span class="p">)</span> <span class="p">(</span><span class="nf">primop?</span> <span class="nv">exp</span><span class="p">))</span>
+  <span class="p">(</span><span class="nf">k</span> <span class="nv">x</span><span class="p">)]</span>
+
+<span class="p">(</span><span class="nf">anf</span> <span class="o">&#39;</span><span class="p">((</span><span class="nf">f</span> <span class="nv">x</span><span class="p">)</span> <span class="p">(</span><span class="nf">g</span> <span class="nv">h</span><span class="p">)))</span> <span class="c1">;; returns the result of first example</span></code></pre></figure>
+
+
+
+    <!-- here's for comment module, but now I don't need it.-->
+    </div>
+
+    <div class="sidenav">
+      <h2>技术</h2>
+      <ul class="artical-list">
+        
+        <li><a href="/eng/2015/02/27/anf-conversion//">ANF 转换实现</a></li>
+        
+        <li><a href="/eng/2015/02/07/exception//">异常(exception)的实现</a></li>
+        
+        <li><a href="/eng/2015/01/21/ooo//">面向对象的实现(Object Oriented Style)</a></li>
+        
+        <li><a href="/eng/2014/12/16/halting-problem//">停机问题（即不完备定理）</a></li>
+        
+        <li><a href="/eng/2014/12/16/Y-conbinator//">Y组合子的实现</a></li>
+        
+        <li><a href="/eng/2014/12/14/a-thought-about-bug//">关于使用软件的一点小想法</a></li>
+        
+      </ul>
+      <h2>杂谈</h2>
+      <ul class="artical-list">
+        
+        <li><a href="/blog/2015/09/04/open-relationship//">开放式关系</a></li>
+        
+        <li><a href="/blog/2015/09/04/deduction-and-induction//">思考的模式</a></li>
+        
+        <li><a href="/blog/2015/02/22/about-new-year//">2015新年随想</a></li>
+        
+        <li><a href="/blog/2015/02/09/sex-and-love//">性、爱情与婚姻</a></li>
+        
+        <li><a href="/blog/2015/01/14/current-love//">好美系列：一（早见明里）</a></li>
+        
+        <li><a href="/blog/2015/01/11/love-and-freedom//">爱与自由</a></li>
+        
+        <li><a href="/blog/2014/12/15/process-dealing-with-pages//">转变</a></li>
+        
+        <li><a href="/blog/2014/12/13/rebuild//">重构</a></li>
+        
+        <li><a href="/blog/2014/04/16/bad-health-lead-to-nothing//">身体是前提</a></li>
+        
+        <li><a href="/blog/2014/02/19/find-the-right-one//">三观合，生活舒适</a></li>
+        
+        <li><a href="/blog/2014/02/08/my-first-blog//">我存在</a></li>
+        
+      </ul>
+    </div>
+
+    <div id="navigator" >
+      <a id="next" href="/blog/2015/09/04/deduction-and-induction/">&lt;&lt;newer 思考的模式</a>
+      |
+      <a id="previous" href="/blog/2015/02/22/about-new-year/">2015新年随想&gt;&gt;</a>
+    </div>
+
+</div>
+
+<script src="/js/jquery-1.7.1.min.js" type="text/javascript"></script>
+<script src="/js/post.js" type="text/javascript"></script>
+
+

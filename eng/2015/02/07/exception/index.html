@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <!--
+        * Author:         Lyruse
+        -->
+        <meta charset="utf-8" />
+        <title>异常(exception)的实现 | Lyruse.com</title>
+        <meta name="author" content="Lyruse" />
+        <meta name="description" content="Lyruse's Blog" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=1.0">
+        <link rel="stylesheet" href="/css/default.css" type="text/css" />
+        <link rel="shortcut icon" href="/favicon.ico" type="image/x-icon" />
+    </head>
+<body>
+    <div class="home-menu">
+        <div class="home-icon-con">
+            <a class="home-menu-icon" href="/">Lyruse</a>
+
+        </div>
+    </div>
+
+    <link rel="stylesheet" href="/css/monokai.css" />
+<style type="text/css">
+    body { background:#e8e8e8; }
+    @media screen and (max-width: 750px){
+        body { background:#fff; }
+    }
+    @media screen and (max-width: 1020px){
+        body { background:#fff; }
+    }
+</style>
+
+<div id="content">
+    <div class="entry">
+        <h1 class="entry-title">异常(exception)的实现</h1>
+        <p class="entry-date">2015-02-07</p>
+        <p>在编程的世界里有这么一句话：</p>
+<blockquote>
+  <p>Programmers are not to be measured by their ingenuity and their logic but 
+by the completeness of their case analysis.</p>
+</blockquote>
+
+<p>像上面说的，虽然编程可以创造一些很美很实用的程序，让编写人获得一种类似工匠创造实物的成就感，可是在创造的过程中不是每时每刻都充满了乐趣与逻辑的美，更多的却是在与各种各样的分支处理打交道。在这些分支处理的代码中，又有很大一部分跟 <code>exception</code> 即异常有关，很大部分的异常跟底层的操作系统调用或类库调用有关，由于历史遗留问题，我们不能奢望什么时候能很方便的处理异常跟处理返回的 <code>union</code> 数据结构一样。</p>
+
+<p>在我的理解里，异常就是一个消息，你可以使用通常的 <code>try...catch...</code> 语义来处理，可以使用平常的函数调用与返回值判断，只是现代的操作系统受 <code>Unix</code> 的不良影响太深，使得返回值一般只能是 <code>int</code> 或 <code>string</code> 类型。如果返回值可以是像 ML 一类语言里面的一种 <code>datatype</code> ，我们就可以很方便的进行返回值判断。</p>
+
+<p>有人说，异常不是很容易嘛，在一个调用栈里面把遇到异常的前面的调用全部忽略掉，直到遇到异常处理函数，然后直接调用处理函数。可是一旦异常加上了一些别的控制结构，比如 <code>while</code> <code>for</code> 和其中的 <code>continue</code> <code>break</code> ，如果再加上 <code>finally</code>,复杂度就爆炸一般上升了。</p>
+
+<p>这里使用的实现语言是 Scheme , 其实任何一个带有 <code>call/cc</code> 函数的函数式语言都可以类似地实现。<code>call/cc</code> 是 <code>call-with-current-continuation</code> 的缩写，这个函数是用来捕获当前位置的调用栈的，比如在 <code>(+ 1 (+ 2 _))</code> 里，下划线<code>_</code>的调用栈就是 <code>(lambda (x) (+ 1 (+ 2 x)))</code>，用大白话来说就是有什么样的操作等着这个值返回。可以说 <code>call/cc</code> 是一种非常强大的语言特性，使用它就像是可以时间旅行一般，在控制流中跳来跳去，无拘无束，通常语言中的回溯，异常，多线程，协程等都可以使用这个构造轻松实现。而它又没有像 <code>setjmp</code> <code>longjmp</code> 那么底层必须得跟很多细节打交道，可以说是对有调用栈的语言的一种很恰当的抽象。</p>
+
+<p>下面我会以 Python 中的异常处理为例子，讲解它的处理机制，然后再用 Scheme 代码来模拟这种表现，最后就是直接让这种处理抽象成为一个个语法糖或函数，可以直接调用。这里使用一种我很推崇的方法论：由小到大，就是先去考虑一种最小可能的情况，然后慢慢的扩展，把后面的扩展建立在前面最小实现的理解基础上。</p>
+
+<h2 id="实现-return">实现 return</h2>
+<p>Python 里面还是分开 statement 和 expression 的， <code>return</code> 在其中就扮演了一个返回中介的角色，很讨厌这个 <code>return</code> 啊，为什么像 Javascript Python 这类跟 Lisp 学习的语言就不能学得像样点，非得加上古老的 <code>return</code> 。</p>
+
+<figure class="highlight"><pre><code class="language-python" data-lang="python"><span class="k">def</span> <span class="nf">max</span><span class="p">(</span><span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">):</span>
+  <span class="k">if</span> <span class="n">a</span> <span class="o">&gt;</span> <span class="n">b</span><span class="p">:</span>
+    <span class="k">return</span> <span class="n">a</span>
+  <span class="k">else</span><span class="p">:</span> 
+    <span class="k">return</span> <span class="n">b</span>
+<span class="k">print</span> <span class="nb">max</span><span class="p">(</span><span class="mi">5</span><span class="p">,</span> <span class="mi">6</span><span class="p">)</span>  <span class="c"># run the function with python 2.7.8 prints 6</span></code></pre></figure>
+
+<p>在我们 Schemer 眼里，一条 <code>return</code> 语句就像是一个二等 <code>exit continuatino</code> 的调用。为什么说是二等呢，因为这个 <code>return</code> 就只能在这个定义函数体里面使用，而 <code>exit continuation</code> 是可以作为参数直接传递给别的函数的，然后如果在定义函数体内的某个函数调用了这个一等函数，那么结果就可以作为整个函数的调用结果直接返回。把上面的代码用 Scheme 写，一看就知道哪个看起来更加美啦~</p>
+
+<figure class="highlight"><pre><code class="language-scheme" data-lang="scheme"><span class="p">(</span><span class="nf">define/return</span> <span class="p">(</span><span class="nb">max </span><span class="nv">a</span> <span class="nv">b</span><span class="p">)</span>
+  <span class="p">(</span><span class="k">if </span><span class="p">(</span><span class="nb">&gt; </span><span class="nv">a</span> <span class="nv">b</span><span class="p">)</span>
+    <span class="p">(</span><span class="nf">return</span> <span class="nv">a</span><span class="p">)</span>
+    <span class="p">(</span><span class="nf">return</span> <span class="nv">b</span><span class="p">)))</span>
+<span class="p">(</span><span class="nb">max </span><span class="mi">5</span> <span class="mi">6</span><span class="p">)</span>  <span class="c1">;;runs the code, with the extra syntax define/return gets 6    </span>
+
+<span class="c1">;; 上面的代码经过 define/return 的语法糖处理后，就变成下面这样</span>
+
+<span class="p">(</span><span class="k">define </span><span class="p">(</span><span class="nb">max </span><span class="nv">a</span> <span class="nv">b</span><span class="p">)</span>
+  <span class="p">(</span><span class="nb">call/cc </span><span class="p">(</span><span class="err">λ</span> <span class="p">(</span><span class="nf">return</span><span class="p">)</span>    <span class="c1">;;λ is the lower letter of lamda (not lambda)</span>
+             <span class="p">(</span><span class="k">if </span><span class="p">(</span><span class="nb">&gt; </span><span class="nv">a</span> <span class="nv">b</span><span class="p">)</span>  <span class="c1">;;but it is used here to get simplicity</span>
+               <span class="p">(</span><span class="nf">return</span> <span class="nv">a</span><span class="p">)</span>
+               <span class="p">(</span><span class="nf">return</span> <span class="nv">b</span><span class="p">)))))</span>
+
+<span class="c1">;; 很自然的，我们可以写出 define/return 这个语法糖的宏定义：</span>
+
+<span class="p">(</span><span class="k">define-syntax </span><span class="nv">define/return</span>
+  <span class="p">(</span><span class="k">lambda </span><span class="p">(</span><span class="nf">stx</span><span class="p">)</span>
+    <span class="p">(</span><span class="nf">syntax-case</span> <span class="nv">stx</span> <span class="p">()</span>
+      <span class="p">[(</span><span class="nf">_</span> <span class="nv">f-params</span> <span class="nv">body</span> <span class="o">...</span><span class="p">)</span>
+       <span class="c1">;=&gt;</span>
+       <span class="p">(</span><span class="nf">with-syntax</span> <span class="p">([</span><span class="nv">return</span> <span class="p">(</span><span class="nf">datum-&gt;syntax</span> <span class="o">#</span><span class="ss">&#39;f-params</span> <span class="ss">&#39;return</span><span class="p">)])</span>
+         <span class="o">#&#39;</span><span class="p">(</span><span class="k">define </span><span class="nv">f-params</span>
+             <span class="p">(</span><span class="nf">call/cc</span>
+               <span class="p">(</span><span class="err">λ</span> <span class="p">(</span><span class="nf">return</span><span class="p">)</span> <span class="nv">body</span> <span class="o">...</span><span class="p">))))])))</span>  <span class="c1">;;the #&#39; represent the code to</span>
+                                             <span class="c1">;; be generated.</span></code></pre></figure>
+
+<p>上面几行代码就轻轻松松的给 Scheme 添加了一个 <code>return</code> 关键字，配合 <code>define/return</code> 使用。对比 Python 和 Lisp让我想起了一个关于 Lisp 的所谓最迷人的故事。</p>
+<blockquote>
+  <p>在 ILC 2002 大会上前Lisp大神，当今的Python倡导者Peter Norvig，由于某些原因，做一个类似于马丁路德在梵蒂冈宣扬新教的主题演讲，因为他在演讲中大胆地声称Python就是一种Lisp。
+讲完后进入提问环节，出乎我意料的是，Peter点了我过道另一侧，靠上面几排座位的一个老头，他衣着皱褶，在演讲刚开始的时候踱步进来，然后就靠在了那个座位上面。
+这老头满头凌乱的白发，邋遢的白胡须，像是从旅行团中落下的游客，已经完全迷路了，闲逛到这里来歇歇脚，随便看看我们都在这里干什么。我的第一个念头是，他会因为我们的奇怪的话题感到相当失望；接着，我意识到这位老头的年纪，想到斯坦福就在附近，而且我想那人也在斯坦福 —— 难道他是……
+“嗨，John，有什么问题？” Peter说。
+虽然这只是10个字左右的问题，我不会假装自己记住了Lisp之父约翰麦卡锡说的每一个字。他在问Python程序能不能像处理数据一样，优雅地处理Python代码。
+“不行。John, Python做不到。” Peter就回答了这一句，然后静静地等待，准备接受教授的质疑，但老人没有再说什么了。此时，无语已胜千言。</p>
+</blockquote>
+
+<h2 id="实现-while">实现 while</h2>
+<p>我们先来看一下 Python 里面 <code>while</code> 语句的一般形式：</p>
+
+<figure class="highlight"><pre><code class="language-python" data-lang="python"><span class="n">i</span> <span class="o">=</span> <span class="mi">0</span>
+<span class="k">while</span> <span class="n">i</span> <span class="o">&lt;</span> <span class="mi">5</span><span class="p">:</span>
+  <span class="k">print</span> <span class="n">i</span>
+  <span class="n">i</span> <span class="o">=</span> <span class="n">i</span> <span class="o">+</span> <span class="mi">1</span>
+<span class="k">else</span><span class="p">:</span>
+  <span class="k">print</span> <span class="s">&quot;over&quot;</span>      <span class="c">#prints 0 1 2 3 4 over</span>
+
+<span class="n">i</span> <span class="o">=</span> <span class="mi">0</span>
+<span class="k">while</span> <span class="n">i</span> <span class="o">&lt;</span> <span class="mi">5</span><span class="p">:</span>
+  <span class="n">i</span> <span class="o">=</span> <span class="n">i</span> <span class="o">+</span> <span class="mi">1</span>
+  <span class="k">if</span> <span class="n">i</span> <span class="o">==</span> <span class="mi">3</span><span class="p">:</span>
+    <span class="k">continue</span>
+  <span class="k">print</span> <span class="n">i</span>
+<span class="k">else</span><span class="p">:</span>
+  <span class="k">print</span> <span class="s">&quot;over&quot;</span>      <span class="c">#prints 1 2 4 5 over</span>
+
+<span class="n">i</span> <span class="o">=</span> <span class="mi">0</span>
+<span class="k">while</span> <span class="n">i</span> <span class="o">&lt;</span> <span class="mi">5</span><span class="p">:</span>
+  <span class="k">if</span> <span class="n">i</span> <span class="o">==</span> <span class="mi">3</span><span class="p">:</span>
+    <span class="k">break</span>
+  <span class="k">print</span> <span class="n">i</span>
+  <span class="n">i</span> <span class="o">=</span> <span class="n">i</span> <span class="o">+</span> <span class="mi">1</span>
+<span class="k">else</span><span class="p">:</span>
+  <span class="k">print</span> <span class="s">&quot;over&quot;</span>      <span class="c">#prints 0 1 2</span></code></pre></figure>
+
+<p><code>while</code> 循环不过就是尾递归或者类C语言里的<code>goto</code>，不过要增添 <code>break</code> 和 <code>continue</code> 让事情变得复杂了一些，特别是当和异常处理叠加在一起的时候，不过我们先忽略太复杂的情况，遵从“由小到大”的方法，先从容易的地方攻克问题的核心组成部分。
+很容易我们可以想到，<code>break</code> 跟 <code>return</code> 非常的类似，都是要从某一个地方逃逸出去, <code>continue</code> 就只是跳过一个递归（或者说循环）过程而已。</p>
+
+<figure class="highlight"><pre><code class="language-scheme" data-lang="scheme"><span class="c1">;; translate the python code into plain scheme code</span>
+<span class="c1">; while cond:</span>
+<span class="c1">;   body</span>
+<span class="c1">; else:</span>
+<span class="c1">;   body2</span>
+
+<span class="p">(</span><span class="nf">call/cc</span>
+  <span class="p">(</span><span class="err">λ</span> <span class="p">(</span><span class="nf">break</span><span class="p">)</span> <span class="c1">;; 设立一个出口点，如果调用break，就立刻从这个出口跳出</span>
+    <span class="p">(</span><span class="k">letrec </span><span class="p">([</span><span class="nv">loop</span> <span class="p">(</span><span class="err">λ</span> <span class="p">()</span>
+                     <span class="p">(</span><span class="k">if </span><span class="nv">cond</span>
+                       <span class="p">(</span><span class="nb">call/cc </span><span class="p">(</span><span class="err">λ</span> <span class="p">(</span><span class="nf">continue</span><span class="p">)</span>  <span class="c1">;; 这里的出口点类似break</span>
+                                  <span class="p">(</span><span class="k">begin </span><span class="nv">body</span> <span class="p">(</span><span class="nf">loop</span><span class="p">))))</span>
+                       <span class="p">(</span><span class="nf">void</span><span class="p">)))])</span>
+      <span class="p">(</span><span class="nf">loop</span><span class="p">)</span>    <span class="c1">;; loop body again and again</span>
+      <span class="nv">body2</span><span class="p">)))</span>  <span class="c1">;; if not break, then run body2</span>
+
+<span class="c1">;; 然后我们把这个过程抽象成一个语法糖，写成宏的形式</span>
+<span class="p">(</span><span class="k">define-syntax </span><span class="nv">while</span>
+  <span class="p">(</span><span class="k">lambda </span><span class="p">(</span><span class="nf">stx</span><span class="p">)</span>
+    <span class="p">(</span><span class="nf">syntax-case</span> <span class="nv">stx</span> <span class="p">()</span>
+      <span class="p">[(</span><span class="nf">_</span> <span class="k">cond </span><span class="nv">body</span> <span class="nv">else</span><span class="p">)</span>
+       <span class="c1">;=&gt;</span>
+       <span class="p">(</span><span class="nf">with-syntax</span> <span class="p">([</span><span class="nv">break</span> <span class="p">(</span><span class="nf">datum-&gt;syntax</span> <span class="o">#</span><span class="ss">&#39;body</span> <span class="ss">&#39;break</span><span class="p">)]</span>
+                     <span class="p">[</span><span class="nv">continue</span> <span class="p">(</span><span class="nf">datum-&gt;syntax</span> <span class="o">#</span><span class="ss">&#39;body</span> <span class="ss">&#39;continue</span><span class="p">)])</span>
+         <span class="o">#&#39;</span><span class="p">(</span><span class="nv">call/cc</span> <span class="p">(</span><span class="err">λ</span> <span class="p">(</span><span class="nf">break</span><span class="p">)</span>
+                      <span class="p">(</span><span class="k">letrec </span><span class="p">([</span><span class="nv">loop</span> <span class="p">(</span><span class="err">λ</span> <span class="p">()</span>
+                                       <span class="p">(</span><span class="k">if </span><span class="nv">cond</span>
+                                         <span class="p">(</span><span class="nb">call/cc </span><span class="p">(</span><span class="err">λ</span> <span class="p">(</span><span class="nf">continue</span><span class="p">)</span>
+                                                    <span class="p">(</span><span class="k">begin </span><span class="nv">body</span> <span class="p">(</span><span class="nf">loop</span><span class="p">))))))])</span>
+                        <span class="p">(</span><span class="nf">loop</span><span class="p">)</span>
+                        <span class="nv">else</span><span class="p">))))])))</span></code></pre></figure>
+
+<p>就这样我们为 Scheme 添加了一个 <code>while</code> 关键字，用于模拟命令式语言里面的循环语句。</p>
+
+<h2 id="实现-try">实现 try</h2>
+<p>下面重头戏终于来了，我们开始着手实现 <code>try...catch...</code>。首先我们忽略 <code>finally</code>，先解决了基本的 <code>catch</code> 语义先。先看几个 Python 的例子。</p>
+
+<figure class="highlight"><pre><code class="language-python" data-lang="python"><span class="k">def</span> <span class="nf">f1</span><span class="p">():</span>
+  <span class="k">try</span><span class="p">:</span>
+    <span class="k">raise</span> <span class="ne">Exception</span><span class="p">()</span>
+  <span class="k">except</span><span class="p">:</span>
+    <span class="k">print</span> <span class="s">&quot;hello&quot;</span>
+<span class="n">f1</span><span class="p">()</span>         <span class="c"># prints &quot;hello&quot;</span>
+
+<span class="k">def</span> <span class="nf">f2</span><span class="p">():</span>
+  <span class="k">try</span><span class="p">:</span>
+    <span class="k">return</span> <span class="s">&quot;world&quot;</span>            <span class="c"># return inside try</span>
+    <span class="k">raise</span> <span class="ne">Exception</span><span class="p">()</span>         <span class="c"># not raise exception since it&#39;s ignored</span>
+  <span class="k">except</span><span class="p">:</span>
+    <span class="k">print</span> <span class="s">&quot;hello&quot;</span>
+<span class="k">print</span> <span class="n">f2</span><span class="p">()</span>    <span class="c"># prints &quot;world&quot;</span>
+
+<span class="k">def</span> <span class="nf">f3</span><span class="p">():</span>
+  <span class="k">while</span> <span class="bp">True</span><span class="p">:</span>
+    <span class="k">try</span><span class="p">:</span>
+      <span class="k">break</span>                  <span class="c"># break inside try</span>
+      <span class="k">raise</span> <span class="ne">Exception</span><span class="p">()</span>
+    <span class="k">except</span><span class="p">:</span>
+      <span class="k">print</span> <span class="s">&quot;hello world&quot;</span>
+  <span class="k">print</span> <span class="s">&quot;another world&quot;</span>
+<span class="n">f3</span><span class="p">()</span>            <span class="c"># prints &quot;another world&quot;</span>
+
+<span class="k">def</span> <span class="nf">f4</span><span class="p">():</span>
+  <span class="k">try</span><span class="p">:</span>
+    <span class="n">i</span> <span class="o">=</span> <span class="mi">0</span>
+    <span class="k">while</span> <span class="n">i</span> <span class="o">&lt;</span> <span class="mi">5</span><span class="p">:</span>       <span class="c"># while inside try</span>
+      <span class="k">if</span> <span class="n">i</span> <span class="o">==</span> <span class="mi">2</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">Exception</span><span class="p">()</span>
+      <span class="n">i</span> <span class="o">=</span> <span class="n">i</span> <span class="o">+</span> <span class="mi">1</span>
+      <span class="k">continue</span>         <span class="c"># this is just for fun</span>
+  <span class="k">except</span><span class="p">:</span>
+    <span class="k">print</span> <span class="s">&quot;hello world&quot;</span>
+<span class="n">f4</span><span class="p">()</span>            <span class="c"># prints &quot;hello world&quot;</span></code></pre></figure>
+
+<p>接下来我们实现 <code>(try body handler)</code> ，这里 <code>handler</code> 是一个接收异常值的函数。我们需要两个全局函数 <code>current-handler</code> <code>set-current-handler!</code>，<code>current-handler</code> 调用返回表示控制流到达处的异常 <code>handler</code>，由于 <code>try</code> 可能叠加，我们需要 <code>set-current-handler!</code> 来改写 <code>$current-handler</code>。</p>
+
+<figure class="highlight"><pre><code class="language-scheme" data-lang="scheme"><span class="p">(</span><span class="k">define </span><span class="nv">$current-handler</span>
+  <span class="p">(</span><span class="k">lambda </span><span class="p">(</span><span class="nf">ex</span><span class="p">)</span> <span class="p">(</span><span class="nf">error</span> <span class="s">&quot;top-level exception!&quot;</span><span class="p">)))</span>
+
+<span class="p">(</span><span class="k">define </span><span class="p">(</span><span class="nf">current-handler</span><span class="p">)</span> <span class="nv">$current-handler</span><span class="p">)</span>
+<span class="p">(</span><span class="k">define </span><span class="p">(</span><span class="nf">set-current-handler!</span> <span class="nv">handler</span><span class="p">)</span>
+  <span class="p">(</span><span class="k">set! </span><span class="nv">$current-handler</span> <span class="nv">handler</span><span class="p">))</span>
+
+<span class="c1">; (try body handler) 的展开代码如下</span>
+
+<span class="p">(</span><span class="k">let </span><span class="p">([</span><span class="nv">$old</span> <span class="p">(</span><span class="nf">current-handler</span><span class="p">)])</span>   <span class="c1">;; 保存旧的handler</span>
+  <span class="p">(</span><span class="nb">call/cc </span><span class="p">(</span><span class="k">lambda </span><span class="p">(</span><span class="nf">ec</span><span class="p">)</span>
+             <span class="p">(</span><span class="nf">set-current-handler!</span>  <span class="c1">;; 设置新的handler来处理body中异常</span>
+               <span class="p">(</span><span class="k">lambda </span><span class="p">(</span><span class="nf">ex</span><span class="p">)</span>
+                 <span class="p">(</span><span class="nf">set-current-handler!</span> <span class="nv">$old</span><span class="p">)</span> <span class="c1">;;一旦调用了这个handler函数体</span>
+                                             <span class="c1">;;就把原先的上层的handler绑定回去</span>
+                 <span class="p">(</span><span class="nf">ec</span> <span class="p">(</span><span class="nf">handler</span> <span class="nv">ex</span><span class="p">))))</span>   <span class="c1">;;使用exit continuation</span>
+                                       <span class="c1">;;在body中直接返回，不运行#1#2代码</span>
+             <span class="p">(</span><span class="k">let </span><span class="p">([</span><span class="nv">return-value</span> <span class="nv">body</span><span class="p">])</span>
+               <span class="p">(</span><span class="nf">set-current-handler!</span> <span class="nv">$old</span><span class="p">)</span>  <span class="c1">; #1</span>
+               <span class="nv">return-value</span><span class="p">))))</span>             <span class="c1">; #2</span>
+
+<span class="p">(</span><span class="nf">define/return</span> <span class="p">(</span><span class="nf">f</span><span class="p">)</span>
+  <span class="p">(</span><span class="nf">try</span> <span class="p">(</span><span class="nf">return</span> <span class="mi">10</span><span class="p">)</span> <span class="p">(</span><span class="k">lambda </span><span class="p">(</span><span class="nf">ex</span><span class="p">)</span> <span class="p">(</span><span class="nb">display </span><span class="s">&quot;你看不到我&quot;</span><span class="p">))))</span>
+
+<span class="c1">;; 函数 `f` 有点像上面的 Python 函数 f3 ，可是如果按照上面的过程进行展开</span>
+<span class="c1">;; $current-handler 就没有解绑定，因为 return 直接退出 try 这个代码块。</span>
+<span class="c1">;; 下次调用到 $current-handler 的时候，使用的函数是</span>
+<span class="c1">;; (lambda (ex) (display &quot;你看不到我&quot;))</span>
+
+<span class="c1">;; 这时候我们就要想办法在进入 try 代码块的时候把 return break continue </span>
+<span class="c1">;; 绑定一些新的值，让他们先进行一些清理工作（即解绑定handler）后再返回。</span>
+
+<span class="p">(</span><span class="k">let </span><span class="p">([</span><span class="nv">$old</span> <span class="p">(</span><span class="nf">current-handler</span><span class="p">)])</span>
+  <span class="p">(</span><span class="k">let* </span><span class="p">([</span><span class="nv">return</span> <span class="p">(</span><span class="err">λ</span> <span class="nv">args</span>
+                   <span class="p">(</span><span class="nf">set-current-handler!</span> <span class="nv">$old</span><span class="p">)</span>  <span class="c1">;; 当被调用的时候，先进行</span>
+                   <span class="p">(</span><span class="nb">apply </span><span class="nv">return</span> <span class="nv">args</span><span class="p">))]</span>        <span class="c1">;; 清理工作，把handler重绑定</span>
+         <span class="p">[</span><span class="nv">continue</span> <span class="p">(</span><span class="err">λ</span> <span class="p">()</span>
+                     <span class="p">(</span><span class="nf">set-current-handler!</span> <span class="nv">$old</span><span class="p">)</span>
+                     <span class="p">(</span><span class="nf">continue</span><span class="p">))]</span>
+         <span class="p">[</span><span class="nv">break</span> <span class="p">(</span><span class="err">λ</span> <span class="p">()</span>
+                  <span class="p">(</span><span class="nf">set-current-handler!</span> <span class="nv">$old</span><span class="p">)</span>
+                  <span class="p">(</span><span class="nf">break</span><span class="p">))])</span>
+    <span class="p">(</span><span class="nf">call/cc</span>
+      <span class="p">(</span><span class="err">λ</span> <span class="p">(</span><span class="nf">cc</span><span class="p">)</span>
+        <span class="p">(</span><span class="nf">set-current-handler!</span>
+          <span class="p">(</span><span class="err">λ</span> <span class="p">(</span><span class="nf">ex</span><span class="p">)</span>
+            <span class="p">(</span><span class="nf">set-current-handler!</span> <span class="nv">$old</span><span class="p">)</span>
+            <span class="p">(</span><span class="nf">cc</span> <span class="p">(</span><span class="nf">handler</span> <span class="nv">ex</span><span class="p">))))</span>
+        <span class="p">(</span><span class="k">let </span><span class="p">([</span><span class="nv">return-value</span> <span class="nv">body</span><span class="p">])</span>
+          <span class="p">(</span><span class="nf">set-current-handler!</span> <span class="nv">$old</span><span class="p">)</span>
+          <span class="nv">return-value</span><span class="p">)))))</span>
+
+<span class="c1">;; 然后把这个展开过程写成 macro 宏的形式</span>
+<span class="p">(</span><span class="k">define-syntax </span><span class="nv">try</span>
+  <span class="p">(</span><span class="k">lambda </span><span class="p">(</span><span class="nf">stx</span><span class="p">)</span>
+    <span class="p">(</span><span class="nf">syntax-case</span> <span class="nv">stx</span> <span class="p">()</span>
+      <span class="p">[(</span><span class="nf">_</span> <span class="nv">body</span> <span class="nv">handler</span><span class="p">)</span>
+       <span class="c1">;=&gt;</span>
+       <span class="p">(</span><span class="nf">with-syntax</span> <span class="p">([</span><span class="nv">return</span> <span class="p">(</span><span class="nf">datum-&gt;syntax</span> <span class="o">#</span><span class="ss">&#39;body</span> <span class="ss">&#39;return</span><span class="p">)]</span>
+                     <span class="p">[</span><span class="nv">break</span> <span class="p">(</span><span class="nf">datum-&gt;syntax</span> <span class="o">#</span><span class="ss">&#39;body</span> <span class="ss">&#39;break</span><span class="p">)]</span>
+                     <span class="p">[</span><span class="nv">continue</span> <span class="p">(</span><span class="nf">datum-&gt;syntax</span> <span class="o">#</span><span class="ss">&#39;body</span> <span class="ss">&#39;continue</span><span class="p">)])</span>
+         <span class="o">#&#39;</span><span class="p">(</span><span class="k">let </span><span class="p">([</span><span class="nv">$old</span> <span class="p">(</span><span class="nf">current-handler</span><span class="p">)])</span>
+             <span class="p">(</span><span class="k">let* </span><span class="p">([</span><span class="nv">return</span> <span class="p">(</span><span class="err">λ</span> <span class="nv">args</span>
+                             <span class="p">(</span><span class="nf">set-current-handler!</span> <span class="nv">$old</span><span class="p">)</span>  
+                             <span class="p">(</span><span class="nb">apply </span><span class="nv">return</span> <span class="nv">args</span><span class="p">))]</span>        
+                    <span class="p">[</span><span class="nv">continue</span> <span class="p">(</span><span class="err">λ</span> <span class="p">()</span>
+                      <span class="p">(</span><span class="nf">set-current-handler!</span> <span class="nv">$old</span><span class="p">)</span>
+                      <span class="p">(</span><span class="nf">continue</span><span class="p">))]</span>
+                    <span class="p">[</span><span class="nv">break</span> <span class="p">(</span><span class="err">λ</span> <span class="p">()</span>
+                      <span class="p">(</span><span class="nf">set-current-handler!</span> <span class="nv">$old</span><span class="p">)</span>
+                      <span class="p">(</span><span class="nf">break</span><span class="p">))])</span>
+              <span class="p">(</span><span class="nf">call/cc</span>
+               <span class="p">(</span><span class="err">λ</span> <span class="p">(</span><span class="nf">cc</span><span class="p">)</span>
+                <span class="p">(</span><span class="nf">set-current-handler!</span>
+                 <span class="p">(</span><span class="err">λ</span> <span class="p">(</span><span class="nf">ex</span><span class="p">)</span>
+                  <span class="p">(</span><span class="nf">set-current-handler!</span> <span class="nv">$old</span><span class="p">)</span>
+                  <span class="p">(</span><span class="nf">cc</span> <span class="p">(</span><span class="nf">handler</span> <span class="nv">ex</span><span class="p">))))</span>
+                <span class="p">(</span><span class="k">let </span><span class="p">([</span><span class="nv">return-value</span> <span class="nv">body</span><span class="p">])</span>
+                 <span class="p">(</span><span class="nf">set-current-handler!</span> <span class="nv">$old</span><span class="p">)</span>
+                 <span class="nv">return-value</span><span class="p">))))))]))</span></code></pre></figure>
+
+<h2 id="实现-try-finally">实现 try finally</h2>
+<p>现在距离完整的异常处理代码只有一步之遥了，可是要想添加 finally 的功能不容易，有很多需要考虑的地方。那么我们首先来看看 Python 代码怎么处理的吧。</p>
+
+<figure class="highlight"><pre><code class="language-python" data-lang="python"><span class="c"># example 1</span>
+<span class="k">try</span><span class="p">:</span>
+  <span class="k">print</span> <span class="s">&quot;inside try body&quot;</span>  <span class="c">#按顺序执行，先执行try里面的内容</span>
+  <span class="k">raise</span> <span class="ne">Exception</span><span class="p">()</span>        <span class="c">#然后抛出异常</span>
+<span class="k">except</span><span class="p">:</span>
+  <span class="k">print</span> <span class="s">&quot;inside except body&quot;</span>  <span class="c">#异常处理，打印内容 </span>
+<span class="k">finally</span><span class="p">:</span>
+  <span class="k">print</span> <span class="s">&quot;inside finally body&quot;</span> <span class="c">#最后要退出try block的时候，运行这里的代码</span>
+<span class="k">print</span> <span class="s">&quot;outside try block&quot;</span>     <span class="c"># 结束try block的时候，运行外面的代码。</span>
+
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">inside try body</span>
+<span class="sd">inside except body</span>
+<span class="sd">inside finally body</span>
+<span class="sd">outside try block</span>
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="c"># example 2</span>
+<span class="k">def</span> <span class="nf">f</span><span class="p">():</span>
+  <span class="k">try</span><span class="p">:</span>
+    <span class="k">raise</span> <span class="ne">Exception</span><span class="p">(</span><span class="s">&quot;Inside try body.&quot;</span><span class="p">)</span>
+  <span class="k">except</span><span class="p">:</span>
+    <span class="k">print</span> <span class="s">&quot;catch exception inside except body.&quot;</span>
+    <span class="k">return</span> <span class="s">&quot;hello world&quot;</span>                 <span class="c"># 直接返回调用函数的值。 </span>
+  <span class="k">finally</span><span class="p">:</span>
+    <span class="k">print</span> <span class="s">&quot;You got me&quot;</span>            <span class="c">#可是在返回前先运行finally代码块</span>
+<span class="k">print</span> <span class="n">f</span><span class="p">()</span>                     <span class="c"># f()返回值为&quot;helo world&quot;,直接打印</span>
+<span class="k">print</span> <span class="s">&quot;outside f function&quot;</span>
+<span class="c"># the result is shown below</span>
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">catch exception inside except body.</span>
+<span class="sd">You got me</span>
+<span class="sd">hello world</span>
+<span class="sd">outside f function</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="c"># example 3</span>
+<span class="k">while</span> <span class="bp">True</span><span class="p">:</span>                   <span class="c"># try 与 while结合</span>
+  <span class="k">try</span><span class="p">:</span>
+    <span class="k">print</span> <span class="s">&quot;inside try body&quot;</span>
+    <span class="k">raise</span> <span class="ne">Exception</span><span class="p">()</span>
+  <span class="k">except</span><span class="p">:</span>
+    <span class="k">print</span> <span class="s">&quot;inside except body&quot;</span>
+    <span class="k">break</span>                      <span class="c"># 直接退出while循环 </span>
+  <span class="k">finally</span><span class="p">:</span>
+    <span class="k">print</span> <span class="s">&quot;inside finally body&quot;</span> <span class="c"># 退出前也要执行finally 代码块</span>
+<span class="k">print</span> <span class="s">&quot;outside while body&quot;</span>
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">inside try body</span>
+<span class="sd">inside except body</span>
+<span class="sd">inside finally body</span>
+<span class="sd">outside while body</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="c"># example 4</span>
+<span class="k">def</span> <span class="nf">f</span><span class="p">():</span>
+  <span class="k">try</span><span class="p">:</span>
+    <span class="k">raise</span> <span class="ne">Exception</span><span class="p">(</span><span class="s">&quot;Inside try body.&quot;</span><span class="p">)</span>
+  <span class="k">except</span><span class="p">:</span>
+    <span class="k">print</span> <span class="s">&quot;catch exception inside except body.&quot;</span>
+    <span class="k">raise</span> <span class="ne">Exception</span><span class="p">(</span><span class="s">&quot;Inside except body&quot;</span><span class="p">)</span><span class="c">#用thunk保存好要raise exception这事</span>
+  <span class="k">finally</span><span class="p">:</span>                               <span class="c">#先运行finally里面的代码先</span>
+    <span class="k">print</span> <span class="s">&quot;You got me&quot;</span>   <span class="c">#就算你前面有异常，也要先运行我这一块代码先</span>
+<span class="k">print</span> <span class="n">f</span><span class="p">()</span>                
+<span class="k">print</span> <span class="s">&quot;outside f function&quot;</span> <span class="c"># 很不幸，前面出错了，你没得被运行了</span>
+<span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">catch exception inside except body.</span>
+<span class="sd">You got me</span>
+<span class="sd">Traceback (most recent call last):</span>
+<span class="sd">  File &quot;/tmp/execpad-19f1d91494c7/source-19f1d91494c7&quot;, line 9, in &lt;module&gt;</span>
+<span class="sd">      print f()                </span>
+<span class="sd">        File &quot;/tmp/execpad-19f1d91494c7/source-19f1d91494c7&quot;, line 6, in f</span>
+<span class="sd">            raise Exception(&quot;Inside except body&quot;)</span>
+<span class="sd">            Exception: Inside except body</span>
+<span class="sd">&quot;&quot;&quot;</span></code></pre></figure>
+
+<p>上面的 Python 代码如果你不相信我给出的结果，可以直接到 <a href="https://eval.in/280120">eval.in</a> 在线编写代码查看结果。</p>
+
+<p>相应的，如果我们要在 <code>(try body handler finally)</code> 代码里实现跟上面 python 代码相同的事情，<code>finally</code> 代码块就不管 <code>body</code> 是正常退出还是使用 <code>return</code> 退出，总之一定要运行。跟上面的 python 几个例子一样，分几种情况讨论。</p>
+
+<ul>
+  <li>如果流程正常退出try，即没有异常或有异常但是在handler块被处理了，那么在运行完finally块后，继续运行接下来的continuation。</li>
+  <li>如果在try块中，流程通过return直接返回<code>x</code>，那么在运行finally后，try块就应当立即返回<code>x</code></li>
+  <li>如果在try块中，使用了while循环专用的<code>break</code>，那么在运行finally后，立刻跳出while循环。</li>
+  <li>如果在try块的handler中出现了异常，那么就应当先把finally运行完后，再把之前出现的异常再次抛出。</li>
+</ul>
+
+<p>经过这么一分析，结果就很明了了，就像之前的进入try代码块要先把 <code>return</code> 重新绑定一样，我们可以把 <code>return</code> <code>break</code>等替换为另一个函数，这个函数做一些工作，创建一个<code>thunk</code>(延迟计算,也就是一个没有参数的函数)绑定到自由变量<code>$fin</code>，然后在运行完<code>finally</code>代码后再运行这个<code>thunk</code>。</p>
+
+<figure class="highlight"><pre><code class="language-scheme" data-lang="scheme"><span class="p">(</span><span class="k">define-syntax </span><span class="nv">try</span>
+  <span class="p">(</span><span class="k">lambda </span><span class="p">(</span><span class="nf">stx</span><span class="p">)</span>
+    <span class="p">(</span><span class="nf">syntax-case</span> <span class="nv">stx</span> <span class="p">()</span>
+      <span class="p">[(</span><span class="nf">_</span> <span class="nv">body</span> <span class="nv">handler</span><span class="p">)</span> <span class="s">&quot;hello&quot;</span> <span class="c1">;... 之前的那个只有handler分支处理</span>
+       <span class="p">]</span>
+      <span class="p">[(</span><span class="nf">_</span> <span class="nv">body</span> <span class="nv">handler</span> <span class="nv">finally</span><span class="p">)</span>
+       <span class="p">(</span><span class="nf">with-syntax</span> <span class="p">([</span><span class="nv">return</span> <span class="p">(</span><span class="nf">datum-&gt;syntax</span> <span class="o">#</span><span class="ss">&#39;body</span> <span class="ss">&#39;return</span><span class="p">)]</span>
+                     <span class="p">[</span><span class="nv">break</span> <span class="p">(</span><span class="nf">datum-&gt;syntax</span> <span class="o">#</span><span class="ss">&#39;body</span> <span class="ss">&#39;break</span><span class="p">)]</span>
+                     <span class="p">[</span><span class="nv">continue</span> <span class="p">(</span><span class="nf">datum-&gt;syntax</span> <span class="o">#</span><span class="ss">&#39;body</span> <span class="ss">&#39;continue</span><span class="p">)])</span>
+         <span class="o">#&#39;</span><span class="p">(</span><span class="k">let* </span><span class="p">([</span><span class="nv">$old</span> <span class="p">(</span><span class="nf">current-handler</span><span class="p">)]</span>
+                  <span class="p">[</span><span class="nv">$val</span> <span class="p">(</span><span class="nf">void</span><span class="p">)]</span>
+                  <span class="p">[</span><span class="nv">$fin</span> <span class="p">(</span><span class="err">λ</span> <span class="p">()</span> <span class="nv">$val</span><span class="p">)])</span>
+             <span class="p">(</span><span class="nb">call/cc </span>
+              <span class="p">(</span><span class="err">λ</span> <span class="p">(</span><span class="nf">fin</span><span class="p">)</span>
+                <span class="p">(</span><span class="k">let* </span><span class="p">([</span><span class="nv">return</span> <span class="p">(</span><span class="err">λ</span> <span class="nv">args</span>
+                                 <span class="p">(</span><span class="k">set! </span><span class="nv">$fin</span> <span class="p">(</span><span class="err">λ</span> <span class="p">()</span> <span class="p">(</span><span class="nb">apply </span><span class="nv">return</span> <span class="nv">args</span><span class="p">)))</span>
+                                 <span class="p">(</span><span class="nf">fin</span><span class="p">))]</span>     <span class="c1">;; 绑定$fin为一个thunk</span>
+                       <span class="p">[</span><span class="nv">break</span> <span class="p">(</span><span class="err">λ</span> <span class="p">()</span>
+                                <span class="p">(</span><span class="k">set! </span><span class="nv">$fin</span> <span class="p">(</span><span class="err">λ</span> <span class="p">()</span> <span class="p">(</span><span class="nf">break</span><span class="p">)))</span>
+                                <span class="p">(</span><span class="nf">fin</span><span class="p">))]</span>
+                       <span class="p">[</span><span class="nv">continue</span> <span class="p">(</span><span class="err">λ</span> <span class="p">()</span>
+                                   <span class="p">(</span><span class="k">set! </span><span class="nv">$fin</span> <span class="p">(</span><span class="err">λ</span> <span class="p">()</span> <span class="p">(</span><span class="nf">continue</span><span class="p">)))</span>
+                                   <span class="p">(</span><span class="nf">fin</span><span class="p">))])</span>
+                  <span class="p">(</span><span class="nf">call/cc</span>
+                   <span class="p">(</span><span class="err">λ</span> <span class="p">(</span><span class="nf">ec</span><span class="p">)</span>
+                     <span class="p">(</span><span class="nf">set-current-handler!</span>
+                      <span class="p">(</span><span class="err">λ</span> <span class="p">(</span><span class="nf">ex</span><span class="p">)</span>
+                        <span class="p">(</span><span class="nf">set-current-handler!</span>  <span class="c1">;在handler中处理可能出现</span>
+                         <span class="p">(</span><span class="err">λ</span> <span class="p">(</span><span class="nf">ex*</span><span class="p">)</span>              <span class="c1">;exception,把它封装为thunk.</span>
+                           <span class="p">(</span><span class="k">set! </span><span class="nv">$fin</span> <span class="p">(</span><span class="err">λ</span> <span class="p">()</span> <span class="p">(</span><span class="nf">throw</span> <span class="nv">ex*</span><span class="p">)))</span><span class="c1">;把finally运行后再触发</span>
+                           <span class="p">(</span><span class="nf">fin</span><span class="p">)))</span> <span class="c1">;; 一旦在handler里面有异常,goto finally.</span>
+                        <span class="p">(</span><span class="nf">ec</span> <span class="p">(</span><span class="k">let </span><span class="p">([</span><span class="nv">rv</span> <span class="p">(</span><span class="nf">handler</span> <span class="nv">ex</span><span class="p">)])</span>
+                              <span class="p">(</span><span class="k">set! </span><span class="nv">$fin</span> <span class="p">(</span><span class="err">λ</span> <span class="p">()</span> <span class="nv">rv</span><span class="p">))))))</span>
+                     <span class="p">(</span><span class="k">let </span><span class="p">([</span><span class="nv">rv</span> <span class="nv">body</span><span class="p">])</span>
+                       <span class="p">(</span><span class="k">set! </span><span class="nv">$fin</span> <span class="p">(</span><span class="err">λ</span> <span class="p">()</span> <span class="nv">rv</span><span class="p">))</span>
+                       <span class="p">(</span><span class="nf">fin</span><span class="p">)))))))</span>
+             <span class="p">(</span><span class="nf">set-current-handler!</span> <span class="nv">$old</span><span class="p">)</span> <span class="c1">;;统一进行handler绑定</span>
+             <span class="p">(</span><span class="k">set! </span><span class="nv">$val</span> <span class="nv">finally</span><span class="p">)</span>   <span class="c1">;;处理finally代码</span>
+             <span class="p">(</span><span class="nf">$fin</span><span class="p">)))])))</span>    <span class="c1">;;然后再处理前面可能已经绑定好的thunk</span>
+<span class="c1">; 然后没有 (try-finally body finally) 作为单一的语法糖，另外进行处理</span>
+<span class="p">(</span><span class="k">define-syntax </span><span class="nv">try-finally</span>
+  <span class="p">(</span><span class="k">lambda </span><span class="p">(</span><span class="nf">stx</span><span class="p">)</span>
+    <span class="p">(</span><span class="nf">syntax-case</span> <span class="nv">stx</span> <span class="p">()</span>
+      <span class="p">[(</span><span class="nf">_</span> <span class="nv">body</span> <span class="nv">finally</span><span class="p">)</span>
+       <span class="p">(</span><span class="nf">with-syntax</span> <span class="p">([</span><span class="nv">return</span> <span class="p">(</span><span class="nf">datum-&gt;syntax</span> <span class="o">#</span><span class="ss">&#39;body</span> <span class="ss">&#39;return</span><span class="p">)]</span>
+                     <span class="p">[</span><span class="nv">break</span> <span class="p">(</span><span class="nf">datum-&gt;syntax</span> <span class="o">#</span><span class="ss">&#39;body</span> <span class="ss">&#39;break</span><span class="p">)]</span>
+                     <span class="p">[</span><span class="nv">continue</span> <span class="p">(</span><span class="nf">datum-&gt;syntax</span> <span class="o">#</span><span class="ss">&#39;body</span> <span class="ss">&#39;continue</span><span class="p">)])</span>
+         <span class="o">#&#39;</span><span class="p">(</span><span class="k">let </span><span class="p">([</span><span class="nv">$old</span> <span class="p">(</span><span class="nf">current-handler</span><span class="p">)]</span>
+                 <span class="p">[</span><span class="nv">$val</span> <span class="p">(</span><span class="nf">void</span><span class="p">)]</span>
+                 <span class="p">[</span><span class="nv">$fin</span> <span class="p">(</span><span class="err">λ</span> <span class="p">()</span> <span class="nv">$val</span><span class="p">)])</span>
+             <span class="p">(</span><span class="nf">call/cc</span>
+              <span class="p">(</span><span class="err">λ</span> <span class="p">(</span><span class="nf">fin</span><span class="p">)</span>
+                <span class="p">(</span><span class="nf">set-current-handler!</span>
+                 <span class="p">(</span><span class="err">λ</span> <span class="p">(</span><span class="nf">ex</span><span class="p">)</span>
+                   <span class="p">(</span><span class="k">set! </span><span class="nv">$fin</span> <span class="p">(</span><span class="err">λ</span> <span class="p">()</span> <span class="p">(</span><span class="nf">throw</span> <span class="nv">ex</span><span class="p">)))</span>
+                   <span class="p">(</span><span class="nf">fin</span><span class="p">)))</span>
+                <span class="p">(</span><span class="k">let </span><span class="p">([</span><span class="nv">rv</span> <span class="nv">body</span><span class="p">])</span>
+                  <span class="p">(</span><span class="k">set! </span><span class="nv">$fin</span> <span class="p">(</span><span class="err">λ</span> <span class="p">()</span> <span class="nv">rv</span><span class="p">))</span>
+                  <span class="p">(</span><span class="nf">fin</span><span class="p">))))</span>
+             <span class="p">(</span><span class="nf">set-current-handler!</span> <span class="nv">$old</span><span class="p">)</span>
+             <span class="p">(</span><span class="k">set! </span><span class="nv">$val</span> <span class="nv">finally</span><span class="p">)</span>
+             <span class="p">(</span><span class="nf">$fin</span><span class="p">)))])))</span>
+
+<span class="c1">;; 当然我们不能忘了抛出异常的关键字：throw</span>
+<span class="p">(</span><span class="k">define </span><span class="p">(</span><span class="nf">throw</span> <span class="nv">ex</span><span class="p">)</span>
+  <span class="p">((</span><span class="nf">current-handler</span><span class="p">)</span> <span class="nv">ex</span><span class="p">))</span>  <span class="c1">;因为current-handler是全局变量</span>
+                           <span class="c1">;可以在函数体内任意处更改，如果用monad来写，</span>
+                           <span class="c1">;真没法想象最后的代码。</span>
+<span class="c1">;; 然后在已经写好的 Scheme 程序里运行相对应的 Python代码来验证正确性                           </span>
+<span class="p">(</span><span class="nf">define/return</span> <span class="p">(</span><span class="nf">f</span><span class="p">)</span>
+  <span class="p">(</span><span class="nf">try</span>
+   <span class="p">(</span><span class="nf">begin</span>
+     <span class="p">(</span><span class="nf">while</span> <span class="no">#t</span>
+            <span class="p">(</span><span class="nf">try</span> 
+             <span class="p">(</span><span class="nf">break</span><span class="p">)</span>
+             <span class="p">(</span><span class="err">λ</span> <span class="p">(</span><span class="nf">ex</span><span class="p">)</span> <span class="p">(</span><span class="nf">printf</span> <span class="s">&quot;wrong exception!~n&quot;</span><span class="p">))))</span>
+     <span class="p">(</span><span class="nf">throw</span> <span class="mi">10</span><span class="p">))</span>
+   <span class="p">(</span><span class="err">λ</span> <span class="p">(</span><span class="nf">ex</span><span class="p">)</span> <span class="p">(</span><span class="nf">printf</span> <span class="s">&quot;right exception!~n&quot;</span><span class="p">))</span>
+   <span class="p">(</span><span class="nf">printf</span> <span class="s">&quot;and, finally.~n&quot;</span><span class="p">)))</span>
+
+<span class="p">(</span><span class="nf">f</span><span class="p">)</span> <span class="c1">; =&gt; prints &quot;right exception!\n&quot; &quot;and, finally.\n&quot; </span></code></pre></figure>
+
+<p>至此，我们就已经把 Python 的整个异常处理机制给重新实现了一遍。</p>
+
+
+    <!-- here's for comment module, but now I don't need it.-->
+    </div>
+
+    <div class="sidenav">
+      <h2>技术</h2>
+      <ul class="artical-list">
+        
+        <li><a href="/eng/2015/02/27/anf-conversion//">ANF 转换实现</a></li>
+        
+        <li><a href="/eng/2015/02/07/exception//">异常(exception)的实现</a></li>
+        
+        <li><a href="/eng/2015/01/21/ooo//">面向对象的实现(Object Oriented Style)</a></li>
+        
+        <li><a href="/eng/2014/12/16/halting-problem//">停机问题（即不完备定理）</a></li>
+        
+        <li><a href="/eng/2014/12/16/Y-conbinator//">Y组合子的实现</a></li>
+        
+        <li><a href="/eng/2014/12/14/a-thought-about-bug//">关于使用软件的一点小想法</a></li>
+        
+      </ul>
+      <h2>杂谈</h2>
+      <ul class="artical-list">
+        
+        <li><a href="/blog/2015/09/04/open-relationship//">开放式关系</a></li>
+        
+        <li><a href="/blog/2015/09/04/deduction-and-induction//">思考的模式</a></li>
+        
+        <li><a href="/blog/2015/02/22/about-new-year//">2015新年随想</a></li>
+        
+        <li><a href="/blog/2015/02/09/sex-and-love//">性、爱情与婚姻</a></li>
+        
+        <li><a href="/blog/2015/01/14/current-love//">好美系列：一（早见明里）</a></li>
+        
+        <li><a href="/blog/2015/01/11/love-and-freedom//">爱与自由</a></li>
+        
+        <li><a href="/blog/2014/12/15/process-dealing-with-pages//">转变</a></li>
+        
+        <li><a href="/blog/2014/12/13/rebuild//">重构</a></li>
+        
+        <li><a href="/blog/2014/04/16/bad-health-lead-to-nothing//">身体是前提</a></li>
+        
+        <li><a href="/blog/2014/02/19/find-the-right-one//">三观合，生活舒适</a></li>
+        
+        <li><a href="/blog/2014/02/08/my-first-blog//">我存在</a></li>
+        
+      </ul>
+    </div>
+
+    <div id="navigator" >
+      <a id="next" href="/blog/2015/02/09/sex-and-love/">&lt;&lt;newer 性、爱情与婚姻</a>
+      |
+      <a id="previous" href="/eng/2015/01/21/ooo/">面向对象的实现(Object Oriented Style)&gt;&gt;</a>
+    </div>
+
+</div>
+
+<script src="/js/jquery-1.7.1.min.js" type="text/javascript"></script>
+<script src="/js/post.js" type="text/javascript"></script>
+
+

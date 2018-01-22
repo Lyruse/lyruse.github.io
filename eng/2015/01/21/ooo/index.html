@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <!--
+        * Author:         Lyruse
+        -->
+        <meta charset="utf-8" />
+        <title>面向对象的实现(Object Oriented Style) | Lyruse.com</title>
+        <meta name="author" content="Lyruse" />
+        <meta name="description" content="Lyruse's Blog" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=1.0">
+        <link rel="stylesheet" href="/css/default.css" type="text/css" />
+        <link rel="shortcut icon" href="/favicon.ico" type="image/x-icon" />
+    </head>
+<body>
+    <div class="home-menu">
+        <div class="home-icon-con">
+            <a class="home-menu-icon" href="/">Lyruse</a>
+
+        </div>
+    </div>
+
+    <link rel="stylesheet" href="/css/monokai.css" />
+<style type="text/css">
+    body { background:#e8e8e8; }
+    @media screen and (max-width: 750px){
+        body { background:#fff; }
+    }
+    @media screen and (max-width: 1020px){
+        body { background:#fff; }
+    }
+</style>
+
+<div id="content">
+    <div class="entry">
+        <h1 class="entry-title">面向对象的实现(Object Oriented Style)</h1>
+        <p class="entry-date">2015-01-21</p>
+        <p>写一些 continuation-passing style 的程序有助于我们了解 continuation 到底是怎么回事，相应的写一些 object-oriented style(OO style) 的程序是一种很好的了解 OOP 语言特性的途径，比如父类方法调用的理解。这里我打算说说 OO style 的写法，然后使用这种写法编写一些例子。</p>
+
+<h2 id="基本概念的介绍">基本概念的介绍</h2>
+
+<p>我们一般使用 style 来表示一种编程语言的编码惯用法。在一些设计得好的语言里，一些 style 是已经被抽象定义好的了，有友好的语法糖来供调用，比如在 Lisp 类的语言里，<code>call/cc</code> 就是 continuation style 的抽象接口；在 OO 类语言里， <code>class</code> 就是 object-oriented style 的接口；在 Actor 类语言里，<code>send</code> and <code>receive</code> 就是接口。这些使用友好的接口都是这些语言的优点，尤其是在使用场景适合的情况下，使用这些语言就如虎添翼一般。但是硬币都有两面，这些优点用另一个角度来观察就全成了缺点，虽然他们易于使用，可是却不易于理解。如果你想精通一门语言，最好的办法还是自己亲自去实现它，搞清楚它的运行原理。可是在这些已经有了高层语义抽象的语言上，我们很难模拟它的运作机制。这时候，Scheme 就能大显身手了，Scheme 作为一门高级语言，可以说是最适合把别的语言的编程 style 显性的暴露在它之上。</p>
+
+<p>这里介绍的 OO style 只有单继承，我们使用一小部分的 Scheme 特性，包括：1）绑定变量为某一个值。 2）First-class procedure 3）列表数据结构 4）向量 Vector，可变单元的向量是为了可变类成员和方法。</p>
+
+<p>了解怎么实现一个面向对象特性，总的来说有三个好处。1）区分类方法调用与父类方法调用的异同。 2）这两种方法调用都不过是普通函数调用的包装，因此他们都可以深度递归调用。 3）如果要使用递归调用（即多次调用类方法），必须要使用一个动态作用域的变量 <code>this</code> or <code>self</code>。</p>
+<h3 id="recursion-through-it">Recursion through <code>it</code></h3>
+
+<figure class="highlight"><pre><code class="language-scheme" data-lang="scheme"><span class="p">(</span><span class="k">define </span><span class="nv">e/o-procs</span>
+  <span class="p">(</span><span class="nf">vector</span>
+    <span class="p">(</span><span class="k">lambda </span><span class="p">(</span><span class="nf">it</span> <span class="nv">n</span><span class="p">)</span>          <span class="c1">;; iseven?</span>
+      <span class="p">(</span><span class="k">if </span><span class="p">(</span><span class="nb">zero? </span><span class="nv">n</span><span class="p">)</span> <span class="no">#t</span><span class="p">)</span>
+        <span class="p">((</span><span class="nb">vector-ref </span><span class="nv">it</span> <span class="mi">1</span><span class="p">)</span> <span class="nv">it</span> <span class="p">(</span><span class="nb">- </span><span class="nv">n</span> <span class="mi">1</span><span class="p">)))</span>
+    <span class="p">(</span><span class="k">lambda </span><span class="p">(</span><span class="nf">it</span> <span class="nv">n</span><span class="p">)</span>          <span class="c1">;; isodd?</span>
+      <span class="p">(</span><span class="k">if </span><span class="p">(</span><span class="nb">zero? </span><span class="nv">n</span><span class="p">)</span> <span class="no">#f</span>
+        <span class="p">((</span><span class="nb">vector-ref </span><span class="nv">it</span> <span class="mi">0</span><span class="p">)</span> <span class="nv">it</span> <span class="p">(</span><span class="nb">- </span><span class="nv">n</span> <span class="mi">1</span><span class="p">)))))</span>
+<span class="nv">&gt;</span> <span class="nv">e/o-procs</span>
+<span class="o">#</span><span class="p">(</span><span class="o">#</span><span class="nv">&lt;iseven?&gt;</span> <span class="o">#</span><span class="nv">&lt;isodd?&gt;</span><span class="p">)</span>
+<span class="nv">&gt;</span><span class="p">((</span><span class="nb">vector-ref </span><span class="nv">e/o-procs</span> <span class="mi">0</span><span class="p">)</span> <span class="nv">e/o-procs</span> <span class="mi">5</span><span class="p">)</span>
+<span class="no">#f</span></code></pre></figure>
+
+<p>在上面的<code>e/o-procs</code>的定义中，我们没有使用自由变量（只有<code>zero?</code>等基本函数和常量<code>#t</code> <code>#f</code>），也没有使用显性递归。我们定义了两个匿名函数存储在向量中，第一个函数在判断 <code>n</code>为零的情况下返回结果 <code>#t</code>，否则从传进来的向量参数<code>it</code>里提取第二个元素（即第二个匿名函数），然后调用这个函数，当然 <code>it</code>也要被当作参数传递。第二个函数的情况很类似，只不过第一个是 <code>iseven?</code>，第二个是 <code>isodd?</code>。</p>
+
+<p>像这样接收一个额外的参数（<code>it</code>）的函数就是面向对象里面说的 <code>method</code>了，包含有这么一大串函数的 Vector 就可以看作是一个 <code>Object</code>。至此，我们已经理解了面向对象的精髓了，方法调用无非就是把普通的函数调用包装起来，然后每一次方法调用都要把对象隐性地传递。更加有趣的是，我们即将要学习怎么让一个新的 Vector 建立在一个旧的 Vector 之上（即类的继承）。</p>
+
+<h2 id="使用样例">使用样例</h2>
+<p>通常我们了解一个系统的使用，最好的方法就是给它一些输入，然后看它返回什么结果。现在我们就先来看看怎么在 Scheme 里使用 OO style 来写程序，假定接口已经写好了。如果这个例子你有点看懵了，可以跳过这一小节。</p>
+
+<figure class="highlight"><pre><code class="language-scheme" data-lang="scheme"><span class="p">(</span><span class="k">define-syntax </span><span class="nv">&lt;&lt;p&gt;&gt;</span>
+  <span class="p">(</span><span class="nf">extend-shadow</span> <span class="nv">&lt;&lt;o&gt;&gt;</span> <span class="p">(</span><span class="nf">x</span> <span class="nv">y</span><span class="p">)</span>
+    <span class="p">([</span><span class="nv">init</span>                      <span class="c1">;; method list</span>
+       <span class="p">(</span><span class="nf">method</span> <span class="p">(</span><span class="nf">x^</span> <span class="nv">y^</span><span class="p">)</span>
+         <span class="p">(</span><span class="k">set! </span><span class="nv">x</span> <span class="nv">x^</span><span class="p">)</span>
+         <span class="p">(</span><span class="k">set! </span><span class="nv">y</span> <span class="nv">y^</span><span class="p">)</span>
+         <span class="p">(</span><span class="nf">init</span> <span class="nv">super</span><span class="p">))]</span>
+     <span class="p">[</span><span class="nv">move</span>
+       <span class="p">(</span><span class="nf">method</span> <span class="p">(</span><span class="nf">dx</span> <span class="nv">dy</span><span class="p">)</span>
+         <span class="p">(</span><span class="k">set! </span><span class="nv">x</span> <span class="p">(</span><span class="nb">+ </span><span class="nv">x</span> <span class="nv">dx</span><span class="p">))</span>
+         <span class="p">(</span><span class="k">set! </span><span class="nv">y</span> <span class="p">(</span><span class="nb">+ </span><span class="nv">y</span> <span class="nv">dy</span><span class="p">)))]</span>
+     <span class="p">[</span><span class="nv">get-loc</span>
+       <span class="p">(</span><span class="nf">method</span> <span class="p">()</span>
+         <span class="p">(</span><span class="nb">list </span><span class="nv">x</span> <span class="nv">y</span><span class="p">))]</span>
+     <span class="p">[</span><span class="nv">diag</span>
+       <span class="p">(</span><span class="nf">method</span> <span class="p">(</span><span class="nf">a</span><span class="p">)</span>
+         <span class="p">(</span><span class="nf">move</span> <span class="nv">it</span> <span class="nv">a</span> <span class="nv">a</span><span class="p">))])))</span>
+<span class="p">(</span><span class="k">define </span><span class="nv">&lt;p&gt;</span> <span class="p">(</span><span class="nf">create-class</span> <span class="nv">&lt;&lt;p&gt;&gt;</span> <span class="nv">&lt;o&gt;</span><span class="p">))</span>
+<span class="p">(</span><span class="k">define-syntax </span><span class="nv">&lt;&lt;cp&gt;&gt;</span>   <span class="c1">;; color point</span>
+  <span class="p">(</span><span class="nf">extend-shadow</span> <span class="nv">&lt;&lt;p&gt;&gt;</span> <span class="p">(</span><span class="nf">hue</span><span class="p">)</span>
+    <span class="p">([</span><span class="nv">init</span>
+       <span class="p">(</span><span class="nf">method</span> <span class="p">(</span><span class="nf">x^</span> <span class="nv">y^</span> <span class="nv">hue^</span><span class="p">)</span>
+         <span class="p">(</span><span class="k">set! </span><span class="nv">hue</span> <span class="nv">hue^</span><span class="p">)</span>
+         <span class="p">(</span><span class="nf">init</span> <span class="nv">super</span> <span class="nv">x^</span> <span class="nv">y^</span><span class="p">))]</span>
+     <span class="p">[</span><span class="nv">get-hue</span>
+       <span class="p">(</span><span class="nf">method</span> <span class="p">()</span> <span class="nv">hue</span><span class="p">)]</span>
+     <span class="p">[</span><span class="nv">diag&amp;set</span>
+       <span class="p">(</span><span class="nf">method</span> <span class="p">(</span><span class="nf">a</span><span class="p">)</span>
+         <span class="p">(</span><span class="nf">diag</span> <span class="nv">it</span> <span class="nv">a</span><span class="p">)</span>
+         <span class="p">(</span><span class="k">set! </span><span class="nv">hue</span> <span class="nv">a</span><span class="p">))])))</span>
+<span class="p">(</span><span class="k">define </span><span class="nv">&lt;cp&gt;</span> <span class="p">(</span><span class="nf">create-class</span> <span class="nv">&lt;&lt;cp&gt;&gt;</span> <span class="nv">&lt;p&gt;</span><span class="p">))</span>         
+<span class="p">(</span><span class="k">define-syntax </span><span class="nv">&lt;&lt;scp&gt;&gt;</span>   <span class="c1">;; stationary color point</span>
+  <span class="p">(</span><span class="nf">extend-shadow</span> <span class="nv">&lt;&lt;cp&gt;&gt;</span> <span class="p">(</span><span class="nf">y</span><span class="p">)</span>
+    <span class="p">([</span><span class="nv">init</span>
+       <span class="p">(</span><span class="nf">method</span> <span class="p">(</span><span class="nf">x^</span> <span class="nv">y^</span> <span class="nv">hue^</span><span class="p">)</span>
+         <span class="p">(</span><span class="k">set! </span><span class="nv">y</span> <span class="s">&quot;: Stuck: &quot;</span><span class="p">)</span>
+         <span class="p">(</span><span class="nf">init</span> <span class="nv">super</span> <span class="nv">x^</span> <span class="nv">y^</span> <span class="nv">hue^</span><span class="p">))]</span>
+     <span class="p">[</span><span class="nv">move</span>
+       <span class="p">(</span><span class="nf">method</span> <span class="p">(</span><span class="nf">x^</span> <span class="nv">y^</span><span class="p">)</span>
+         <span class="p">(</span><span class="nf">show-y</span> <span class="nv">it</span><span class="p">))]</span>
+     <span class="p">[</span><span class="nv">diag</span>
+       <span class="p">(</span><span class="nf">method</span> <span class="p">(</span><span class="nf">a</span><span class="p">)</span>
+         <span class="p">(</span><span class="nb">write </span><span class="nv">hue</span><span class="p">)</span>
+         <span class="p">(</span><span class="nf">diag</span> <span class="nv">super</span> <span class="nv">a</span><span class="p">))]</span>
+     <span class="p">[</span><span class="nv">show-y</span>
+       <span class="p">(</span><span class="nf">method</span> <span class="p">()</span> <span class="p">(</span><span class="nb">display </span><span class="nv">y</span><span class="p">))])))</span>
+
+<span class="p">(</span><span class="k">define </span><span class="nv">&lt;scp&gt;</span> <span class="p">(</span><span class="nf">create-class</span> <span class="nv">&lt;&lt;scp&gt;&gt;</span> <span class="nv">&lt;cp&gt;</span><span class="p">))</span>         </code></pre></figure>
+
+<p>把一些类写好了后，我们就来测试一下到底运行的结果合不合预期。</p>
+
+<figure class="highlight"><pre><code class="language-scheme" data-lang="scheme"><span class="p">(</span><span class="k">define </span><span class="nv">test</span>
+  <span class="p">(</span><span class="k">lambda </span><span class="p">(</span><span class="nf">c</span><span class="p">)</span>
+    <span class="p">(</span><span class="k">let </span><span class="p">([</span><span class="nv">p</span> <span class="p">(</span><span class="nf">new</span> <span class="nv">&lt;p&gt;</span> <span class="mi">1</span> <span class="mi">2</span><span class="p">)]</span>  <span class="c1">;; build objects of class &lt;p&gt;</span>
+          <span class="p">[</span><span class="nv">cp</span> <span class="p">(</span><span class="nf">new</span> <span class="nv">c</span> <span class="mi">18</span> <span class="mi">19</span> <span class="mi">9</span><span class="p">)])</span>  <span class="c1">;; and of class &lt;scp&gt; or &lt;cp&gt;</span>
+      <span class="p">(</span><span class="nf">mbv</span> <span class="nv">diag&amp;set</span> <span class="nv">cp</span> <span class="mi">10</span><span class="p">)</span>   <span class="c1">;; method call using mbv object.</span>
+      <span class="p">(</span><span class="nb">list </span>
+        <span class="p">(</span><span class="nb">list </span>
+          <span class="p">(</span><span class="nf">invoke</span> <span class="nv">&lt;&lt;cp&gt;&gt;</span> <span class="nv">get-loc</span> <span class="nv">cp</span><span class="p">)</span>  <span class="c1">;; mothod call using invoke and shadow</span>
+          <span class="p">(</span><span class="nf">invoke</span> <span class="nv">&lt;&lt;cp&gt;&gt;</span> <span class="nv">get-hue</span> <span class="nv">cp</span><span class="p">))</span>
+        <span class="p">(</span><span class="nf">isa?</span> <span class="nv">cp</span> <span class="nv">&lt;p&gt;</span><span class="p">)</span>
+        <span class="p">(</span><span class="nf">isa?</span> <span class="nv">p</span> <span class="nv">c</span><span class="p">)))))</span>  
+<span class="nv">&gt;</span><span class="p">(</span><span class="k">begin </span><span class="p">(</span><span class="nb">write </span><span class="p">(</span><span class="nf">test</span> <span class="nv">&lt;scp&gt;</span><span class="p">))</span> <span class="p">(</span><span class="nb">write </span><span class="p">(</span><span class="nf">test</span> <span class="p">(</span><span class="nf">cp</span><span class="p">))))</span>
+<span class="mi">9</span><span class="nv">:</span> <span class="nv">Stuck:</span> <span class="p">(((</span><span class="mi">18</span> <span class="mi">19</span><span class="p">)</span> <span class="mi">10</span><span class="p">)</span> <span class="no">#f</span> <span class="no">#t</span><span class="p">)</span> <span class="p">(((</span><span class="mi">28</span> <span class="mi">29</span><span class="p">)</span> <span class="mi">10</span><span class="p">)</span> <span class="no">#t</span> <span class="no">#f</span><span class="p">)</span></code></pre></figure>
+
+<h2 id="类与对象">类与对象</h2>
+<p>一个类（class）是用三个元素的列表来表示的，这三个元素分别是：field environment(一个含有所有 field name 的列表), method environment（一个含有所有 method name 的列表）, and a method vector（匿名函数组成的 vector）. 一个对象（object）跟类有点相似，不同的是对象在类的基础上往第一个元素增添了点东西，那个东西是一个 field vector。如此一来就好理解了，同一个类可以产生很多的对象，而这些不同的对象使用不同的参数来进行初始化，填充 field vector，在函数式语言里，对象无非就是 <code>(cons (cons (vector ..) (car class)) (cdr class))</code> 形成的一个新的列表。在编程世界里，无论你使用什么数据结构来表示一个你想表达的概念都是无关紧要的，最重要的是你提供了什么样的接口，只要接口提供了良好的抽象，那就是 representation independent ，底层的数据结构可以变化。下面我们来定义一下针对类与对象实现操作的函数。</p>
+
+<p>一共要实现10个接口操作：<br /></p>
+<h3 id="环境扩展接口环境即是都有哪些元素在类里面">环境扩展接口（环境即是都有哪些元素在类里面）</h3>
+<p><code>_fx</code>: field extend, used to extend the class’s field environment.<br />
+<code>_mx</code>: method extend, used to extend the class’s method environment.</p>
+
+<figure class="highlight"><pre><code class="language-scheme" data-lang="scheme"><span class="p">(</span><span class="k">define </span><span class="p">(</span><span class="nf">_fx</span> <span class="nv">c</span> <span class="nv">e</span><span class="p">)</span> <span class="p">(</span><span class="nf">append-env</span> <span class="p">(</span><span class="nb">car </span><span class="nv">c</span><span class="p">)</span> <span class="nv">e</span><span class="p">))</span>  <span class="c1">; c represents class</span>
+<span class="p">(</span><span class="k">define </span><span class="p">(</span><span class="nf">_mx</span> <span class="nv">c</span> <span class="nv">e</span><span class="p">)</span> <span class="p">(</span><span class="nf">append-env</span> <span class="p">(</span><span class="nb">cadr </span><span class="nv">c</span><span class="p">)</span> <span class="nv">e</span><span class="p">))</span></code></pre></figure>
+
+<h3 id="类成员获取或修改接口">类成员获取或修改接口</h3>
+<p><code>_mp</code>: method position-based access, used to get the method from a class or object.<br />
+<code>_mp!</code>: method position-based update, used to change the method with a class or object.<br />
+<code>_fp</code>: field position-based access, used to get the field’s value from an object.<br />
+<code>_fp!</code>: field position-based update, used to change the field’s value within an object.<br /></p>
+
+<figure class="highlight"><pre><code class="language-scheme" data-lang="scheme"><span class="p">(</span><span class="k">define </span><span class="p">(</span><span class="nf">_mp</span> <span class="nv">oc</span> <span class="nv">p</span><span class="p">)</span> <span class="p">(</span><span class="nb">vector-ref </span><span class="p">(</span><span class="nb">caddr </span><span class="nv">oc</span><span class="p">)</span> <span class="nv">p</span><span class="p">))</span>  <span class="c1">; oc represents a object or class</span>
+<span class="p">(</span><span class="k">define </span><span class="p">(</span><span class="nf">_mp!</span> <span class="nv">oc</span> <span class="nv">p</span> <span class="nv">v</span><span class="p">)</span> <span class="p">(</span><span class="nb">vector-set! </span><span class="p">(</span><span class="nb">caddr </span><span class="nv">oc</span><span class="p">)</span> <span class="nv">p</span> <span class="nv">v</span><span class="p">))</span>
+<span class="p">(</span><span class="k">define </span><span class="p">(</span><span class="nf">_fp</span> <span class="nv">o</span> <span class="nv">p</span><span class="p">)</span> <span class="p">(</span><span class="nb">vector-ref </span><span class="p">(</span><span class="nb">caar </span><span class="nv">o</span><span class="p">)</span> <span class="nv">p</span><span class="p">))</span>
+<span class="p">(</span><span class="k">define </span><span class="p">(</span><span class="nf">_fp!</span> <span class="nv">o</span> <span class="nv">p</span><span class="p">)</span> <span class="p">(</span><span class="nb">vector-ref </span><span class="p">(</span><span class="nb">caar </span><span class="nv">o</span><span class="p">)</span> <span class="nv">p</span> <span class="nv">v</span><span class="p">))</span></code></pre></figure>
+
+<h3 id="判断类或对象是否-equal-接口">判断类或对象是否 equal 接口</h3>
+<p><code>_mteq?</code>: checks if method tables equal?</p>
+
+<figure class="highlight"><pre><code class="language-scheme" data-lang="scheme"><span class="p">(</span><span class="k">define </span><span class="p">(</span><span class="nf">_mteq?</span> <span class="nv">oc1</span> <span class="nv">oc2</span><span class="p">)</span> <span class="p">(</span><span class="nb">eq? </span><span class="p">(</span><span class="nb">cdr </span><span class="nv">oc1</span><span class="p">)</span> <span class="p">(</span><span class="nb">cdr </span><span class="nv">oc2</span><span class="p">)))</span></code></pre></figure>
+
+<h3 id="制造对象和获取成员接口">制造对象和获取成员接口</h3>
+<p><code>_n</code>: makes a new empty object using a class.<br />
+<code>_mv</code>: access the method by calculating the method position.<br />
+<code>_fv</code>: access the field value by calculating the field position.<br /></p>
+
+<figure class="highlight"><pre><code class="language-scheme" data-lang="scheme"><span class="p">(</span><span class="k">define </span><span class="p">(</span><span class="nf">_n</span> <span class="nv">c</span><span class="p">)</span>
+  <span class="p">(</span><span class="nb">cons </span><span class="p">(</span><span class="nb">make-vector </span><span class="p">(</span><span class="nb">length </span><span class="p">(</span><span class="nb">car </span><span class="nv">c</span><span class="p">)))</span> <span class="p">(</span><span class="nb">cdr </span><span class="nv">c</span><span class="p">)))</span>
+<span class="p">(</span><span class="k">define </span><span class="p">(</span><span class="nf">_mv</span> <span class="nv">oc</span> <span class="nv">m</span><span class="p">)</span>
+  <span class="p">(</span><span class="nf">_mp</span> <span class="nv">oc</span>
+    <span class="p">(</span><span class="k">let </span><span class="nv">loop</span> <span class="p">([</span><span class="nv">m*</span> <span class="p">(</span><span class="nb">cadr </span><span class="nv">oc</span><span class="p">)]</span> <span class="p">[</span><span class="nv">pos</span> <span class="mi">0</span><span class="p">])</span>
+      <span class="p">(</span><span class="k">if </span><span class="p">(</span><span class="nb">eqv? </span><span class="p">(</span><span class="nb">car </span><span class="nv">m*</span><span class="p">)</span> <span class="nv">m</span><span class="p">)</span>
+        <span class="nv">pos</span>
+        <span class="p">(</span><span class="nf">loop</span> <span class="p">(</span><span class="nb">cdr </span><span class="nv">m*</span><span class="p">)</span> <span class="p">(</span><span class="nb">+ </span><span class="nv">pos</span> <span class="mi">1</span><span class="p">))))))</span>
+<span class="p">(</span><span class="k">define </span><span class="p">(</span><span class="nf">_fv</span> <span class="nv">o</span> <span class="nv">f</span><span class="p">)</span>
+  <span class="p">(</span><span class="nf">_fp</span> <span class="nv">o</span>
+    <span class="p">(</span><span class="k">let </span><span class="nv">loop</span> <span class="p">([</span><span class="nv">f*</span> <span class="p">(</span><span class="nb">cdar </span><span class="nv">o</span><span class="p">)]</span> <span class="p">[</span><span class="nv">pos</span> <span class="mi">0</span><span class="p">])</span>
+      <span class="p">(</span><span class="k">if </span><span class="p">(</span><span class="nb">eqv? </span><span class="p">(</span><span class="nb">car </span><span class="nv">f*</span><span class="p">)</span> <span class="nv">f</span><span class="p">)</span>
+        <span class="nv">pos</span>
+        <span class="p">(</span><span class="nf">loop</span> <span class="p">(</span><span class="nb">cdr </span><span class="nv">m*</span><span class="p">)</span> <span class="p">(</span><span class="nb">+ </span><span class="nv">pos</span> <span class="mi">1</span><span class="p">))))))</span></code></pre></figure>
+
+<p>当我们使用 <code>_mv</code> 或 <code>_fv</code> 时，我们是在使用成员名称来调用方法或数据的，这应该称为外部接口。加上 <code>_n</code>，一共三个外部接口，其余的都是内部接口，内部接口即是只能作为类定义的时候使用的接口。</p>
+
+<h2 id="object-oriented-style">Object-Oriented Style</h2>
+<p>这一节我们使用已经定义好的接口来展示面向对象程序的核心。</p>
+
+<figure class="highlight"><pre><code class="language-scheme" data-lang="scheme"><span class="p">(</span><span class="k">define </span><span class="nv">&lt;o&gt;</span>   <span class="c1">;; 有点像是 javascript 里面的 Object, 提供最基本的函数。</span>
+  <span class="p">(</span><span class="nf">list</span>
+    <span class="o">&#39;</span><span class="p">()</span>     <span class="c1">;; this is a empty field environment.</span>
+    <span class="o">&#39;</span><span class="p">(</span><span class="nv">isa?</span> <span class="nv">init</span><span class="p">)</span> <span class="c1">;; this is a method environmentw</span>
+    <span class="p">(</span><span class="nf">vector</span>
+      <span class="p">(</span><span class="k">lambda </span><span class="p">(</span><span class="nf">it</span> <span class="nv">c</span><span class="p">)</span>
+        <span class="p">(</span><span class="nf">_mteq?</span> <span class="nv">it</span> <span class="nv">c</span><span class="p">))</span>
+      <span class="p">(</span><span class="k">lambda </span><span class="p">(</span><span class="nf">it</span> <span class="o">.</span> <span class="nv">args</span><span class="p">)</span>
+        <span class="p">(</span><span class="nf">void</span><span class="p">)))))</span> 
+<span class="nv">&gt;&lt;o&gt;</span>
+<span class="p">(()</span>
+ <span class="p">(</span><span class="nf">isa?</span> <span class="nv">init</span><span class="p">)</span>
+ <span class="o">#</span><span class="p">(</span><span class="o">#</span><span class="nv">&lt;isa?&gt;</span> <span class="o">#</span><span class="nv">&lt;init&gt;</span><span class="p">))</span>  <span class="c1">;; # 表示后面的是一个 vector</span>
+
+<span class="p">(</span><span class="k">define </span><span class="nv">&lt;p&gt;</span>
+  <span class="p">(</span><span class="nf">list</span>
+    <span class="p">(</span><span class="nf">_fx</span> <span class="nv">&lt;o&gt;</span> <span class="o">&#39;</span><span class="p">(</span><span class="nv">x</span> <span class="nv">y</span><span class="p">))</span>  <span class="c1">;; 当我们使用一般 oo 语言来继承的时候，他们就是这样帮我们加一些东西的。</span>
+    <span class="p">(</span><span class="nf">_mx</span> <span class="nv">&lt;o&gt;</span> <span class="o">&#39;</span><span class="p">(</span><span class="nv">move</span> <span class="nv">get-loc</span> <span class="nv">diag</span><span class="p">))</span>
+    <span class="p">(</span><span class="nf">vector</span>
+      <span class="p">(</span><span class="k">lambda </span><span class="p">(</span><span class="nf">it</span> <span class="nv">c</span><span class="p">)</span>      <span class="c1">;; isa? 覆盖父类的isa? 方法。</span>
+        <span class="p">(</span><span class="k">or </span><span class="p">(</span><span class="nf">_mteq?</span> <span class="nv">it</span> <span class="nv">c</span><span class="p">)</span>
+          <span class="p">((</span><span class="nf">_mp</span> <span class="nv">&lt;o&gt;</span> <span class="mi">0</span><span class="p">)</span> <span class="nv">&lt;o&gt;</span> <span class="nv">c</span><span class="p">)))</span> <span class="c1">; 调用父类的函数。</span>
+      <span class="p">(</span><span class="k">lambda </span><span class="p">(</span><span class="nf">it</span> <span class="nv">x^</span> <span class="nv">y^</span><span class="p">)</span>  <span class="c1">;; init 覆盖父类的 init 方法。</span>
+        <span class="p">(</span><span class="nf">_fp!</span> <span class="nv">it</span> <span class="nv">o</span> <span class="nv">x^</span><span class="p">)</span>
+        <span class="p">(</span><span class="nf">_fp!</span> <span class="nv">it</span> <span class="mi">1</span> <span class="nv">y^</span><span class="p">)</span>
+        <span class="p">((</span><span class="nf">_mp</span> <span class="nv">&lt;o&gt;</span> <span class="mi">1</span><span class="p">)</span> <span class="nv">it</span><span class="p">))</span> <span class="c1">;; 可在有需要的时候，调用父类的方法。</span>
+      <span class="p">(</span><span class="k">lambda </span><span class="p">(</span><span class="nf">it</span> <span class="nv">dx</span> <span class="nv">dy</span><span class="p">)</span>  <span class="c1">;; move</span>
+        <span class="p">(</span><span class="nf">_fp!</span> <span class="nv">it</span> <span class="mi">0</span> <span class="p">(</span><span class="nb">+ </span><span class="p">(</span><span class="nf">_fp</span> <span class="nv">it</span> <span class="mi">0</span><span class="p">)</span> <span class="nv">dx</span><span class="p">))</span>
+        <span class="p">(</span><span class="nf">_fp!</span> <span class="nv">it</span> <span class="mi">1</span> <span class="p">(</span><span class="nb">+ </span><span class="p">(</span><span class="nf">_fp</span> <span class="nv">it</span> <span class="mi">1</span><span class="p">)</span> <span class="nv">dy</span><span class="p">)))</span> <span class="c1">;手写的，必须要记住成员的位置</span>
+      <span class="p">(</span><span class="k">lambda </span><span class="p">(</span><span class="nf">it</span><span class="p">)</span>        <span class="c1">;; get-loc   ;很烦啊。</span>
+        <span class="p">(</span><span class="nb">list </span><span class="p">(</span><span class="nf">_fp</span> <span class="nv">it</span> <span class="mi">0</span><span class="p">)</span> <span class="p">(</span><span class="nf">_fp</span> <span class="nv">it</span> <span class="mi">1</span><span class="p">)))</span>
+      <span class="p">(</span><span class="k">lambda </span><span class="p">(</span><span class="nf">it</span> <span class="nv">a</span><span class="p">)</span>      <span class="c1">;; diag</span>
+        <span class="p">((</span><span class="nf">_mp</span> <span class="nv">it</span> <span class="mi">2</span><span class="p">)</span> <span class="nv">it</span> <span class="nv">a</span> <span class="nv">a</span><span class="p">)))))</span>  <span class="c1">;; use the diag to process the fields</span>
+<span class="nv">&gt;</span> <span class="nv">&lt;p&gt;</span>
+<span class="p">((</span><span class="nf">x</span> <span class="nv">y</span><span class="p">)</span>
+<span class="p">(</span><span class="nf">isa?</span> <span class="nv">init</span> <span class="nv">move</span> <span class="nv">get-loc</span> <span class="nv">diag</span><span class="p">)</span>
+<span class="o">#</span><span class="p">(</span><span class="o">#</span><span class="nv">&lt;isa?&gt;</span> <span class="o">#</span><span class="nv">&lt;init&gt;</span> <span class="o">#</span><span class="nv">&lt;move&gt;</span> <span class="o">#</span><span class="nv">&lt;get-loc&gt;</span> <span class="o">#</span><span class="nv">&lt;diag&gt;</span><span class="p">))</span>
+
+<span class="nv">&gt;</span><span class="p">(</span><span class="k">define </span><span class="nv">p</span> <span class="p">(</span><span class="nf">_n</span> <span class="nv">&lt;p&gt;</span><span class="p">))</span>
+<span class="nv">&gt;</span><span class="p">((</span><span class="nf">_mp</span> <span class="nv">p</span> <span class="mi">1</span><span class="p">)</span> <span class="nv">p</span> <span class="mi">12</span> <span class="mi">13</span><span class="p">)</span> <span class="c1">;初始化</span>
+<span class="nv">&gt;p</span>
+<span class="p">(((</span><span class="o">#</span><span class="p">(</span><span class="mi">12</span> <span class="mi">13</span><span class="p">))</span> <span class="o">.</span> <span class="p">(</span><span class="nf">x</span> <span class="nv">y</span><span class="p">))</span>
+ <span class="p">(</span><span class="nf">isa?</span> <span class="nv">init</span> <span class="nv">move</span> <span class="nv">get-loc</span> <span class="nv">diag</span><span class="p">)</span>
+ <span class="o">#</span><span class="p">(</span><span class="o">#</span><span class="nv">&lt;isa?&gt;</span> <span class="o">#</span><span class="nv">&lt;init&gt;</span> <span class="o">#</span><span class="nv">&lt;move&gt;</span> <span class="o">#</span><span class="nv">&lt;get-loc&gt;</span> <span class="o">#</span><span class="nv">&lt;diag&gt;</span><span class="p">))</span>
+<span class="nv">&gt;</span><span class="p">((</span><span class="nf">_mv</span> <span class="nv">p</span> <span class="ss">&#39;move</span><span class="p">)</span> <span class="nv">p</span> <span class="mi">14</span> <span class="mi">15</span><span class="p">)</span>  
+<span class="nv">&gt;p</span>
+<span class="p">(((</span><span class="o">#</span><span class="p">(</span><span class="mi">26</span> <span class="mi">28</span><span class="p">))</span> <span class="o">.</span> <span class="p">(</span><span class="nf">x</span> <span class="nv">y</span><span class="p">))</span>
+ <span class="p">(</span><span class="nf">isa?</span> <span class="nv">init</span> <span class="nv">move</span> <span class="nv">get-loc</span> <span class="nv">diag</span><span class="p">)</span>
+ <span class="o">#</span><span class="p">(</span><span class="o">#</span><span class="nv">&lt;isa?&gt;</span> <span class="o">#</span><span class="nv">&lt;init&gt;</span> <span class="o">#</span><span class="nv">&lt;move&gt;</span> <span class="o">#</span><span class="nv">&lt;get-loc&gt;</span> <span class="o">#</span><span class="nv">&lt;diag&gt;</span><span class="p">))</span></code></pre></figure>
+
+
+
+    <!-- here's for comment module, but now I don't need it.-->
+    </div>
+
+    <div class="sidenav">
+      <h2>技术</h2>
+      <ul class="artical-list">
+        
+        <li><a href="/eng/2015/02/27/anf-conversion//">ANF 转换实现</a></li>
+        
+        <li><a href="/eng/2015/02/07/exception//">异常(exception)的实现</a></li>
+        
+        <li><a href="/eng/2015/01/21/ooo//">面向对象的实现(Object Oriented Style)</a></li>
+        
+        <li><a href="/eng/2014/12/16/halting-problem//">停机问题（即不完备定理）</a></li>
+        
+        <li><a href="/eng/2014/12/16/Y-conbinator//">Y组合子的实现</a></li>
+        
+        <li><a href="/eng/2014/12/14/a-thought-about-bug//">关于使用软件的一点小想法</a></li>
+        
+      </ul>
+      <h2>杂谈</h2>
+      <ul class="artical-list">
+        
+        <li><a href="/blog/2015/09/04/open-relationship//">开放式关系</a></li>
+        
+        <li><a href="/blog/2015/09/04/deduction-and-induction//">思考的模式</a></li>
+        
+        <li><a href="/blog/2015/02/22/about-new-year//">2015新年随想</a></li>
+        
+        <li><a href="/blog/2015/02/09/sex-and-love//">性、爱情与婚姻</a></li>
+        
+        <li><a href="/blog/2015/01/14/current-love//">好美系列：一（早见明里）</a></li>
+        
+        <li><a href="/blog/2015/01/11/love-and-freedom//">爱与自由</a></li>
+        
+        <li><a href="/blog/2014/12/15/process-dealing-with-pages//">转变</a></li>
+        
+        <li><a href="/blog/2014/12/13/rebuild//">重构</a></li>
+        
+        <li><a href="/blog/2014/04/16/bad-health-lead-to-nothing//">身体是前提</a></li>
+        
+        <li><a href="/blog/2014/02/19/find-the-right-one//">三观合，生活舒适</a></li>
+        
+        <li><a href="/blog/2014/02/08/my-first-blog//">我存在</a></li>
+        
+      </ul>
+    </div>
+
+    <div id="navigator" >
+      <a id="next" href="/eng/2015/02/07/exception/">&lt;&lt;newer 异常(exception)的实现</a>
+      |
+      <a id="previous" href="/blog/2015/01/14/current-love/">好美系列：一（早见明里）&gt;&gt;</a>
+    </div>
+
+</div>
+
+<script src="/js/jquery-1.7.1.min.js" type="text/javascript"></script>
+<script src="/js/post.js" type="text/javascript"></script>
+
+

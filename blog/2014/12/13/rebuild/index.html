@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <!--
+        * Author:         Lyruse
+        -->
+        <meta charset="utf-8" />
+        <title>重构 | Lyruse.com</title>
+        <meta name="author" content="Lyruse" />
+        <meta name="description" content="Lyruse's Blog" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=1.0">
+        <link rel="stylesheet" href="/css/default.css" type="text/css" />
+        <link rel="shortcut icon" href="/favicon.ico" type="image/x-icon" />
+    </head>
+<body>
+    <div class="home-menu">
+        <div class="home-icon-con">
+            <a class="home-menu-icon" href="/">Lyruse</a>
+
+        </div>
+    </div>
+
+    <link rel="stylesheet" href="/css/monokai.css" />
+<style type="text/css">
+    body { background:#e8e8e8; }
+    @media screen and (max-width: 750px){
+        body { background:#fff; }
+    }
+    @media screen and (max-width: 1020px){
+        body { background:#fff; }
+    }
+</style>
+
+<div id="content">
+    <div class="entry">
+        <h1 class="entry-title">重构</h1>
+        <p class="entry-date">2014-12-13</p>
+        <p>我有个很别扭的习惯，看到以前写的一些文字，总是情不自禁的的害羞起来，似乎在现在的我看来，当时写下这些文字的那个我该有多么的娇羞与青涩啊。特别是接受了多个感叹号或者句号表示内心的强烈不自信的观点后，再后头看看以前与人聊天时标点符号的乱用一气，不由得又害羞起来了，当时如果接收文字的人是现在的我，那得憋住多么大的一股气才不至于爆炸啊。才开头那么几句话，就用了两个“啊”字作为结尾，我是多么的喜欢感叹啊（又多了一个），不用感叹号了，换用字体了。</p>
+
+<p>看着自己博客上的多篇幼稚不成熟的口水文，真的有种冲动赶紧把他删除个干净，那时候连码字时的心态都能上上去，还把域名告诉了几个朋友，现在看来真是不害臊。可是为什么要害臊呢，虽然一直在努力，但就是克服不了害羞的本性。这应该是我最大的性格缺陷了，害羞的本质难道是对自己的不自信导致的？就像没有那个本钱，我不敢进去豪车店闲逛。</p>
+
+<p>连岳说了，他花了十年才进了自由主义的大门，期间最大的帮助就是在一份报纸上连续地写专栏，那份专栏清楚的记载了他这些年的进步，十年前的文章在现在的他看来就是不及格，几年前的文章基本上要大改才能符合现在的想法，然后一两年前的才会基本上契合越来越正的三观（自己认为的正三观）。作为一个甚少总结，甚少码字的looser，看到几个月前的文章就会感觉很羞愧，虽然不是因为基本思想上的走偏，而是那种调侃轻松和指点江山的态度。文字真的是一种很好的表达方式，虽然没有图像那样直观，但是码下的每一个字却都是反映了此刻真实的心态与redex。等于自己是自己的考官，不断的追问自己到底出了什么问题。杂乱的心绪也能在码字的时候处于专注的状态，一心想着我想表达的是什么，我能表达好吗，我能把问题说清楚吗？最近王垠的中文博客关了，连一向很少有骄傲语气的英文博客也上锁了，twitter也不发一言，好好好失落。之前一直拜王垠为至高无上的大神，出于盲目崇拜的地步，以为自己详细阅读了好几遍他的全部博文，阅读了他写的开源代码，就获得了他那般看透本质的能力，能睥睨众生，一览众山小。可是阅读真的能带来能力上真正的提高吗?如果一直不实践，不切身体会其中的道理与原则，真的能下次碰到同样问题的时候，能想起那种解决问题的思路吗？我其实是很迷信权威的人，没有自己的坚实的观点，不靠自己去推导，去发散思维，总是等别人来总结，这样的我怎么会有进步呢。他为什么关了博客啊，因为博客被太多人关注，不喜欢被人知道自己的真实想法吗？可是人生在世，真正关心自己的除了父母外，还能剩下几个，别的人不是评价傻逼就是图个一乐。为什么要害怕自己写下的文字会被人看到，本来发表在网上就是图个一乐，这段我都写了这么一大段了，也没有主题，就想到哪就敲下来，也毫无逻辑性，全都是无病呻吟，可是我爽啊。写完，再git commit一下，我的文章就算是散播了全世界了，就算无一人浏览，但他就在那里，我高兴，哈哈。</p>
+
+<p>总有些人上网来找隐私权，著作权，真是可笑，自己主动上网的东西，还要求别人不要随便浏览，不能随便引用，真是的，都不知道怎么说那一群人好了。想要隐私就不要上网，搬到山洞里面居住好了，现代社会，还有什么真正的隐私，一切电子化后，资料无论有多少，都能存储，都能瞬间查询。是什么样子就什么样子好了，何必瞻前顾后。</p>
+
+<p>哈哈，爽快，不用交差的胡写就是愉快。听着跳动的canon，好带感，让文字流动起来吧。</p>
+
+<p>重新使用vim，一下子什么配置操作类的都丢了大半了，不过我英语好，奈何不了我，随便：help 就是大路通罗马了。不能我要想想怎么样才能自动的防止再出现这样的不适应。是不是可以针对每一种软件和语言记录下最简单的操作和如果获得帮助呢，免得间隔久了就忘得一干二净了。写中文还真的是不用考虑什么语法之类的，想到什么就写，也不管是不是S+V+O结构，其实有些中文我阅读起来着实费劲。比如一个否定词后面的话语范围到底是多少，有时候真的理解费劲，这算不算是parse的成本，如果任何语言都能在谓词逻辑的作用范围里加上个括号就好了，哈哈，显示了我狂热Lisp粉的世界观了。看别的语言就觉得傻逼，感叹为什么不加上个括号呢，加上括号后，多容易阅读理解呢，一目了然的结构。最近读了一下《Writing Solid Code》一书，作者就提到了面对不同种类的操作符，最后就是加上括号，不用去查表了解操作符的优先级。作者竟然是FORTH的作者之一啊（好像是编译器的编写者之一，哎，怎么不去了解一下具体的情况呢，懒猪。），牛逼啊。</p>
+
+<p>就这样吧，有空把博客的about界面改一下，不然真的太low了。</p>
+
+
+
+    <!-- here's for comment module, but now I don't need it.-->
+    </div>
+
+    <div class="sidenav">
+      <h2>技术</h2>
+      <ul class="artical-list">
+        
+        <li><a href="/eng/2015/02/27/anf-conversion//">ANF 转换实现</a></li>
+        
+        <li><a href="/eng/2015/02/07/exception//">异常(exception)的实现</a></li>
+        
+        <li><a href="/eng/2015/01/21/ooo//">面向对象的实现(Object Oriented Style)</a></li>
+        
+        <li><a href="/eng/2014/12/16/halting-problem//">停机问题（即不完备定理）</a></li>
+        
+        <li><a href="/eng/2014/12/16/Y-conbinator//">Y组合子的实现</a></li>
+        
+        <li><a href="/eng/2014/12/14/a-thought-about-bug//">关于使用软件的一点小想法</a></li>
+        
+      </ul>
+      <h2>杂谈</h2>
+      <ul class="artical-list">
+        
+        <li><a href="/blog/2015/09/04/open-relationship//">开放式关系</a></li>
+        
+        <li><a href="/blog/2015/09/04/deduction-and-induction//">思考的模式</a></li>
+        
+        <li><a href="/blog/2015/02/22/about-new-year//">2015新年随想</a></li>
+        
+        <li><a href="/blog/2015/02/09/sex-and-love//">性、爱情与婚姻</a></li>
+        
+        <li><a href="/blog/2015/01/14/current-love//">好美系列：一（早见明里）</a></li>
+        
+        <li><a href="/blog/2015/01/11/love-and-freedom//">爱与自由</a></li>
+        
+        <li><a href="/blog/2014/12/15/process-dealing-with-pages//">转变</a></li>
+        
+        <li><a href="/blog/2014/12/13/rebuild//">重构</a></li>
+        
+        <li><a href="/blog/2014/04/16/bad-health-lead-to-nothing//">身体是前提</a></li>
+        
+        <li><a href="/blog/2014/02/19/find-the-right-one//">三观合，生活舒适</a></li>
+        
+        <li><a href="/blog/2014/02/08/my-first-blog//">我存在</a></li>
+        
+      </ul>
+    </div>
+
+    <div id="navigator" >
+      <a id="next" href="/eng/2014/12/14/a-thought-about-bug/">&lt;&lt;newer 关于使用软件的一点小想法</a>
+      |
+      <a id="previous" href="/blog/2014/04/16/bad-health-lead-to-nothing/">身体是前提&gt;&gt;</a>
+    </div>
+
+</div>
+
+<script src="/js/jquery-1.7.1.min.js" type="text/javascript"></script>
+<script src="/js/post.js" type="text/javascript"></script>
+
+
